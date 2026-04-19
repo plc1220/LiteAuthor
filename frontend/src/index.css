@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Georgia", serif;
+  --font-sans: "Helvetica Neue", "Arial", sans-serif;
+
+  --color-parchment: #0F0F0F;
+  --color-parchment-dim: #141414;
+  --color-parchment-bright: #1A1A1A;
+  
+  --color-ink: #E0E0E0;
+  --color-ink-muted: #888888;
+  
+  --color-sepia-low: #141414;
+  --color-sepia-mid: #1A1A1A;
+  --color-sepia-high: #242424;
+  --color-sepia-highest: #2A2A2A;
+  
+  --color-primary: #D4AF37;
+  --color-primary-container: #1A1A1A;
+  
+  --color-amber-wax: #D4AF37;
+  --color-amber-wax-container: #ba9a30;
+  
+  --color-oak: #888888;
+  --color-oak-variant: rgba(255, 255, 255, 0.1);
+
+  --radius-soft: 4px;
+}
+
+@layer base {
+  body {
+    @apply bg-parchment text-ink font-sans;
+    background-image: none;
+  }
+}
+
+@layer utilities {
+  .deckle-edge {
+    border-bottom: 2px solid theme('colors.amber-wax');
+  }
+  
+  .paper-grain {
+    position: relative;
+  }
+  
+  .paper-grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    background: radial-gradient(circle at center, transparent, rgba(0,0,0,0.5));
+  }
+
+  .stacked-paper {
+    @apply relative bg-parchment-bright border border-oak-variant shadow-lg;
+  }
+}
