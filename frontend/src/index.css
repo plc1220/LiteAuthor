@@ -1,60 +1,400 @@
-@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,200;1,300;1,400;1,500;1,600;1,700;1,800&family=Public+Sans:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-serif: "Georgia", serif;
-  --font-sans: "Helvetica Neue", "Arial", sans-serif;
+  /* ── Font families ── */
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-sans: "Public Sans", "Helvetica Neue", Arial, sans-serif;
 
-  --color-parchment: #0F0F0F;
-  --color-parchment-dim: #141414;
-  --color-parchment-bright: #1A1A1A;
-  
-  --color-ink: #E0E0E0;
-  --color-ink-muted: #888888;
-  
-  --color-sepia-low: #141414;
-  --color-sepia-mid: #1A1A1A;
-  --color-sepia-high: #242424;
-  --color-sepia-highest: #2A2A2A;
-  
-  --color-primary: #D4AF37;
-  --color-primary-container: #1A1A1A;
-  
-  --color-amber-wax: #D4AF37;
-  --color-amber-wax-container: #ba9a30;
-  
-  --color-oak: #888888;
-  --color-oak-variant: rgba(255, 255, 255, 0.1);
+  /* ── Surface tones (warm parchment palette) ── */
+  --color-surface: #fff8ef;
+  --color-surface-dim: #e3d9c1;
+  --color-surface-bright: #fff8ef;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #fdf3da;
+  --color-surface-container: #f7edd4;
+  --color-surface-container-high: #f1e8cf;
+  --color-surface-container-highest: #ece2c9;
+  --color-surface-variant: #ece2c9;
 
-  --radius-soft: 4px;
+  /* ── Text / ink tones ── */
+  --color-on-surface: #201b0c;
+  --color-on-surface-variant: #3f3833;
+  --color-inverse-surface: #35301f;
+  --color-inverse-on-surface: #faf0d7;
+  --color-on-background: #201b0c;
+  --color-background: #fff8ef;
+
+  /* ── Outline / border tones ── */
+  --color-outline: #80756f;
+  --color-outline-variant: #d2c4bd;
+
+  /* ── Primary (ink) ── */
+  --color-primary: #271a12;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #3e2f26;
+  /* Readable ink on dark wax seal / container chips */
+  --color-on-primary-container: #e8ddd4;
+  --color-inverse-primary: #dac2b5;
+  --color-primary-fixed: #f7ded0;
+  --color-primary-fixed-dim: #dac2b5;
+  --color-on-primary-fixed: #261911;
+  --color-on-primary-fixed-variant: #54433a;
+
+  /* ── Secondary (amber / wax) ── */
+  --color-secondary: #825506;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #ffc16d;
+  --color-on-secondary-container: #784d00;
+  --color-secondary-fixed: #ffddb5;
+  --color-secondary-fixed-dim: #f9bb68;
+  --color-on-secondary-fixed: #2a1800;
+  --color-on-secondary-fixed-variant: #643f00;
+
+  /* ── Tertiary (weathered oak) ── */
+  --color-tertiary: #321500;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #4c290b;
+  --color-on-tertiary-container: #c38f69;
+  --color-tertiary-fixed: #ffdcc5;
+  --color-tertiary-fixed-dim: #f4bb92;
+  --color-on-tertiary-fixed: #301400;
+  --color-on-tertiary-fixed-variant: #653d1e;
+
+  /* ── Error tones ── */
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+
+  /* ── Misc ── */
+  --color-surface-tint: #6d5b50;
+
+  /* ── Typography scale ── */
+  --text-h1: normal 40px/1.2 var(--font-serif);
+  --text-h1-tracking: -0.02em;
+  --text-h1-weight: 600;
+
+  --text-h2: normal 32px/1.3 var(--font-serif);
+  --text-h2-weight: 500;
+
+  --text-prose-body: normal 20px/1.7 var(--font-serif);
+  --text-prose-body-weight: 400;
+
+  --text-ui-label: normal 14px/1.2 var(--font-sans);
+  --text-ui-label-weight: 500;
+  --text-ui-label-tracking: 0.05em;
+
+  --text-ui-button: normal 12px/1 var(--font-sans);
+  --text-ui-button-weight: 600;
+
+  --text-caption: normal 16px/1.4 var(--font-serif);
+  --text-caption-weight: 400;
+
+  /* ── Spacing system ── */
+  --spacing-unit: 4px;
+  --spacing-page-margin: 80px;
+  --spacing-prose-width: 720px;
+  --spacing-gutter: 24px;
+  --spacing-section-gap: 48px;
+
+  /* ── Border radius ── */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+  --radius-soft: 0.25rem;
 }
 
+/* ── Base layer ── */
 @layer base {
   body {
-    @apply bg-parchment text-ink font-sans;
-    background-image: none;
+    @apply text-on-surface font-sans;
+    min-height: 100dvh;
+    /* Aged paper: base wash + uneven sunning + edge foxing + fiber grain */
+    background-color: var(--color-surface);
+    background-image:
+      linear-gradient(
+        168deg,
+        rgba(255, 252, 246, 0.92) 0%,
+        rgba(255, 245, 228, 0.45) 42%,
+        rgba(235, 218, 188, 0.55) 100%
+      ),
+      radial-gradient(ellipse 140% 90% at 50% -20%, rgba(255, 255, 252, 0.55), transparent 52%),
+      radial-gradient(ellipse 70% 55% at 0% 100%, rgba(198, 175, 140, 0.22), transparent 55%),
+      radial-gradient(ellipse 65% 50% at 100% 85%, rgba(188, 165, 130, 0.18), transparent 50%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.055'/%3E%3C/svg%3E");
+    background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
+    background-size: auto, auto, auto, auto, 160px 160px;
+    background-blend-mode: normal, soft-light, multiply, multiply, multiply;
+    background-attachment: fixed;
+  }
+
+  /* Prose / writing canvas */
+  .prose-canvas {
+    max-width: var(--spacing-prose-width);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--spacing-gutter);
+    padding-right: var(--spacing-gutter);
+    margin-inline: var(--spacing-page-margin);
+  }
+
+  /* Typography */
+  h1 {
+    @apply font-serif;
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    @apply font-serif;
+    font-size: 32px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .prose-body {
+    @apply font-serif;
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 1.7;
+  }
+
+  .ui-label {
+    @apply font-sans;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.05em;
+  }
+
+  .ui-button {
+    @apply font-sans;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .caption {
+    @apply font-serif;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.4;
   }
 }
 
+/* ── Utility layer ── */
 @layer utilities {
+
+  /* ── Deckle-edge divider (torn paper texture, low-contrast) ── */
   .deckle-edge {
-    border-bottom: 2px solid theme('colors.amber-wax');
+    border-bottom: 1px solid var(--color-outline-variant);
+    background: linear-gradient(
+      to right,
+      transparent 0%,
+      var(--color-outline-variant) 15%,
+      var(--color-surface) 30%,
+      var(--color-outline-variant) 45%,
+      transparent 50%,
+      var(--color-outline-variant) 55%,
+      var(--color-surface) 70%,
+      var(--color-outline-variant) 85%,
+      transparent 100%
+    );
+    background-size: 100% 2px;
+    background-repeat: no-repeat;
+    background-position: bottom;
+    height: 2px;
+    margin: var(--spacing-section-gap) 0;
   }
-  
+
+  /* ── Paper grain texture overlay ── */
   .paper-grain {
     position: relative;
   }
-  
+
   .paper-grain::before {
     content: "";
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: 0.05;
-    background: radial-gradient(circle at center, transparent, rgba(0,0,0,0.5));
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23grain)'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+    mix-blend-mode: multiply;
   }
 
+  /* ── Stacked paper cards (2-3 offset borders, no shadows) ── */
   .stacked-paper {
-    @apply relative bg-parchment-bright border border-oak-variant shadow-lg;
+    @apply relative bg-surface-container-lowest border border-outline-variant;
+    border-radius: var(--radius-lg);
+    /* No box-shadow — depth via tonal layers */
+    box-shadow:
+      0 0 0 1px var(--color-outline-variant),
+      0 0 0 2px var(--color-surface-container),
+      0 0 0 3px var(--color-surface-container-high);
+  }
+
+  /* ── Wax seal / ink stamp primary button ── */
+  .btn-wax-seal {
+    @apply bg-secondary text-on-secondary border border-secondary rounded-[var(--radius-soft)];
+    padding: 8px 20px;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .btn-wax-seal:hover {
+    @apply bg-secondary-container text-on-secondary-container;
+    border-color: var(--color-on-secondary-fixed-variant);
+  }
+
+  .btn-wax-seal:active {
+    @apply bg-on-secondary-fixed text-on-secondary;
+    border-color: var(--color-on-secondary-fixed);
+  }
+
+  /* ── Ghost button (weathered-oak border) ── */
+  .btn-ghost {
+    @apply bg-transparent text-on-surface border border-outline rounded-[var(--radius-soft)];
+    padding: 8px 20px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-ghost:hover {
+    @apply bg-surface-container;
+  }
+
+  /* ── Inkline input (bottom border only, embossed) ── */
+  .inkline-input {
+    @apply bg-transparent text-on-surface border-0 border-b border-outline-variant focus:border-primary focus:outline-none;
+    border-radius: 0;
+    padding: 8px 4px;
+    font-size: 16px;
+    font-family: var(--font-serif);
+    /* Subtle pressed/embossed effect */
+    box-shadow: inset 0 -1px 0 0 var(--color-surface-dim);
+  }
+
+  .inkline-input::placeholder {
+    @apply text-on-surface-variant;
+  }
+
+  /* ── Inkline textarea ── */
+  .inkline-textarea {
+    @apply bg-transparent text-on-surface border-0 border-b border-outline-variant focus:border-primary focus:outline-none resize-y;
+    border-radius: 0;
+    padding: 8px 4px;
+    font-size: 20px;
+    font-family: var(--font-serif);
+    line-height: 1.7;
+    box-shadow: inset 0 -1px 0 0 var(--color-surface-dim);
+  }
+
+  /* ── Scrap paper chip / tag ── */
+  .chip-scrap,
+  .status-draft {
+    @apply inline-flex items-center rounded-[var(--radius-soft)] text-ui-label bg-surface-container text-on-surface-variant border border-outline-variant;
+    padding: 2px 10px;
+    font-size: 12px;
+  }
+
+  /* ── Canvas / writing area ── */
+  .writing-canvas {
+    max-width: var(--spacing-prose-width);
+    margin-inline: var(--spacing-page-margin);
+    padding-inline: var(--spacing-gutter);
+  }
+
+  /* ── Section gap (fresh page) ── */
+  .section-gap {
+    margin-block: var(--spacing-section-gap);
+  }
+
+  /* ── Float panel (rests on parchment, no rigid sidebar) ── */
+  .float-panel {
+    @apply bg-surface-container-high border border-outline-variant rounded-[var(--radius-lg)];
+    /* No box-shadow — tonal layer only */
+    box-shadow: 0 0 0 1px var(--color-outline-variant);
+  }
+
+  /* ── Search bar (pressed parchment effect) ── */
+  .search-bar {
+    @apply bg-surface-container-lowest border border-outline-variant rounded-[var(--radius-soft)];
+    /* Inner pressed stroke */
+    box-shadow: inset 0 0 0 1px var(--color-surface-dim);
+    padding: 8px 16px;
+  }
+
+  /* ── Cursor styling (thin charcoal line) ── */
+  .zen-cursor {
+    caret-color: var(--color-primary);
+  }
+
+  /* ── Organic geometric rounded container ── */
+  .organic-rounded {
+    border-radius: var(--radius-lg);
+    /* Slight irregular feel via border */
+    border: 1px solid var(--color-outline-variant);
+  }
+
+  /* ── Chapter / section break ── */
+  .chapter-break {
+    text-align: center;
+  }
+
+  .chapter-break::after {
+    content: "✦";
+    display: block;
+    color: var(--color-outline-variant);
+    font-size: 20px;
+    margin-top: 12px;
+  }
+
+  /* ── Status / draft labels (same layout as .chip-scrap; @apply cannot reference custom utilities in Tailwind v4) ── */
+  .status-review {
+    @apply inline-flex items-center rounded-[var(--radius-soft)] text-ui-label bg-secondary-container text-on-secondary-container border border-outline-variant;
+    padding: 2px 10px;
+    font-size: 12px;
+  }
+
+  .status-published {
+    @apply inline-flex items-center rounded-[var(--radius-soft)] text-ui-label bg-primary-container text-on-primary-container border border-outline-variant;
+    padding: 2px 10px;
+    font-size: 12px;
+  }
+
+  /* ── Error state ── */
+  .error-text {
+    @apply text-error;
+  }
+
+  .error-bg {
+    @apply bg-error-container text-on-error-container;
+  }
+
+  /* ── Inverse / dark surface ── */
+  .inverse-surface {
+    @apply bg-inverse-surface text-inverse-on-surface;
+  }
+
+  /* ── Tonal elevation (no shadows) ── */
+  .elevated-1 {
+    @apply bg-surface-container-lowest border border-outline-variant;
+  }
+
+  .elevated-2 {
+    @apply bg-surface-container border border-outline-variant;
+  }
+
+  .elevated-3 {
+    @apply bg-surface-container-high border border-outline;
   }
 }
