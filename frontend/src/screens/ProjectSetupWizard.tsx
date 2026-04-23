@@ -28,7 +28,7 @@ type CharacterSeed = {
 const STEPS = ['Identity', 'Style Profile', 'Structure', 'Seed Characters', 'Review & Create'];
 
 function FieldLabel({children}: {children: React.ReactNode}) {
-  return <label className="font-sans text-[10px] text-oak uppercase block mb-2 font-bold tracking-widest">{children}</label>;
+  return <label className="font-sans text-[10px] text-ink-muted uppercase block mb-2 font-bold tracking-widest">{children}</label>;
 }
 
 function SelectField({
@@ -100,6 +100,8 @@ function describeAxis(value: number, low: string, balanced: string, high: string
 
 export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
   const createProject = useProjectStore((s) => s.createProject);
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const exitTarget = activeProject ? 'StoryWikiHub' : 'LibraryHome';
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
@@ -152,7 +154,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
 
   const skipStep = () => {
     if (step === 0) {
-      onNavigate('StoryWikiHub', 'push_back');
+      onNavigate(exitTarget, 'push_back');
       return;
     }
     if (step < STEPS.length - 1) goToStep(step + 1);
@@ -547,8 +549,8 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
   );
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#f0eade] paper-grain">
-      <header className="fixed top-0 left-0 right-0 h-10 flex justify-between items-center px-6 z-10 bg-sepia-low border-b border-oak-variant text-ink font-serif text-sm opacity-30 pointer-events-none">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-parchment-dim paper-grain">
+      <header className="fixed top-0 left-0 right-0 h-10 flex justify-between items-center px-6 z-10 bg-parchment-bright/80 border-b border-oak-variant text-ink font-serif text-sm pointer-events-none">
         <div className="flex items-center gap-6">
           <span className="italic text-xl font-bold">LiteAuthor</span>
           <nav className="hidden sm:flex items-center gap-4">
@@ -564,16 +566,16 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
         </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center p-4 pt-14">
-        <div className="bg-parchment-bright w-full max-w-[880px] relative flex flex-col min-h-[calc(100vh-7rem)] max-h-[calc(100vh-5rem)] stacked-paper overflow-hidden">
+      <main className="min-h-0 flex-1 overflow-hidden px-4 pb-6 pt-14 sm:px-6">
+        <div className="bg-parchment-bright mx-auto flex h-full min-h-0 w-full max-w-[920px] flex-col overflow-hidden stacked-paper relative">
           <div className="h-2 w-full bg-sepia-highest deckle-edge absolute top-0 left-0 rotate-180" />
 
-          <div className="px-6 sm:px-10 pt-9 pb-4 border-b border-sepia-highest bg-parchment-bright/90 relative z-20">
+          <div className="shrink-0 px-6 sm:px-10 pt-9 pb-4 border-b border-oak-variant bg-parchment-bright/95 relative z-20">
             <div className="flex items-center justify-between gap-4">
               <button
                 type="button"
                 className="font-sans text-[10px] font-bold text-oak hover:text-primary transition-colors flex items-center gap-1 uppercase tracking-widest bg-transparent border-none cursor-pointer"
-                onClick={() => (step === 0 ? onNavigate('StoryWikiHub', 'push_back') : goToStep(step - 1))}
+                onClick={() => (step === 0 ? onNavigate(exitTarget, 'push_back') : goToStep(step - 1))}
               >
                 <ArrowLeft className="w-3 h-3" /> Back
               </button>
@@ -603,7 +605,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 sm:p-10 lg:p-12">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6 pb-12 sm:p-10 sm:pb-14 lg:p-12 lg:pb-16">
             <div className="w-full max-w-[720px] mx-auto">
               {step === 0 ? renderIdentity() : null}
               {step === 1 ? renderStyle() : null}
@@ -614,7 +616,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
             </div>
           </div>
 
-          <div className="p-5 sm:px-10 border-t border-sepia-highest flex items-center justify-between gap-4 bg-sepia-low/30 relative z-20">
+          <div className="shrink-0 p-5 sm:px-10 border-t border-oak-variant flex flex-wrap items-center justify-between gap-4 bg-sepia-low relative z-20">
             <div className="hidden sm:flex items-center gap-2 text-oak font-sans text-[10px] uppercase tracking-widest font-bold">
               {STEPS.map((stepName, index) => (
                 <span key={stepName} className={index === step ? 'text-primary' : ''}>
@@ -635,7 +637,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
               {step < STEPS.length - 1 ? (
                 <button
                   type="button"
-                  className="bg-primary text-parchment px-8 py-3 rounded-sm font-sans text-xs font-bold uppercase tracking-[0.1em] shadow-lg hover:brightness-110 active:scale-95 transition-all border-none cursor-pointer"
+                  className="bg-primary text-parchment-bright px-8 py-3 rounded-sm font-sans text-xs font-bold uppercase tracking-[0.1em] hover:bg-amber-wax active:scale-95 transition-all border border-primary cursor-pointer"
                   onClick={continueWizard}
                 >
                   Continue <ArrowRight className="inline w-3.5 h-3.5 ml-1 align-[-2px]" />
@@ -644,7 +646,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
                 <button
                   type="button"
                   disabled={busy}
-                  className="bg-primary text-parchment px-8 py-3 rounded-sm font-sans text-xs font-bold uppercase tracking-[0.1em] shadow-lg hover:brightness-110 active:scale-95 transition-all border-none cursor-pointer disabled:opacity-50"
+                  className="bg-primary text-parchment-bright px-8 py-3 rounded-sm font-sans text-xs font-bold uppercase tracking-[0.1em] hover:bg-amber-wax active:scale-95 transition-all border border-primary cursor-pointer disabled:opacity-50"
                   onClick={() => void finish()}
                 >
                   {busy ? 'Creating...' : 'Create Project'}

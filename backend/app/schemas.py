@@ -84,6 +84,13 @@ class ZenAIRequest(BaseModel):
     role: str = "literary_editor"
 
 
+class AutocompleteRequest(BaseModel):
+    before: str = Field(max_length=6000)
+    after: str = Field(default="", max_length=1200)
+    previousParagraph: str = Field(default="", max_length=2400)
+    documentMemory: str = Field(default="", max_length=1200)
+
+
 class SuggestionCreate(BaseModel):
     scene_id: str
     range_from: int
@@ -116,3 +123,56 @@ class ContinuityFlagCreate(BaseModel):
 
 class ContinuityFlagPatch(BaseModel):
     status: str
+
+
+class CanvasNode(BaseModel):
+    id: str
+    type: str = "text"
+    x: float = 0
+    y: float = 0
+    width: float = 280
+    height: float = 160
+    text: Optional[str] = None
+    label: Optional[str] = None
+    color: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanvasEdge(BaseModel):
+    id: str
+    fromNode: str
+    toNode: str
+    label: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StoryCanvas(BaseModel):
+    version: str = "liteauthor.story-canvas.v1"
+    nodes: list[CanvasNode] = Field(default_factory=list)
+    edges: list[CanvasEdge] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanvasAnalyzeRequest(BaseModel):
+    title: str = "Artifact"
+    text: str = Field(min_length=1, max_length=120000)
+
+
+class CanvasAutosortRequest(BaseModel):
+    canvas: StoryCanvas
+    mode: str = "type"
+
+
+class CaptureProposal(BaseModel):
+    id: str
+    kind: str
+    title: str
+    target: str
+    content: str
+    source_node_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanvasCaptureRequest(BaseModel):
+    proposals: list[CaptureProposal]
+    apply: bool = False

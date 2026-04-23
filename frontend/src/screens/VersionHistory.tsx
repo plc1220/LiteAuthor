@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Clock3, FileStack, GitBranch, History, Plus, RotateCcw, SplitSquareHorizontal} from 'lucide-react';
+import {Clock3, FileStack, Plus, RotateCcw, SplitSquareHorizontal} from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
 import {SecondaryPageNav} from '../components/SecondaryPageNav';
@@ -104,7 +104,7 @@ export default function VersionHistory({onNavigate}: NavigationProps) {
         <div>
           <p className="font-serif text-lg italic mb-4">Select a project before opening version history.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Story Wiki
+            Project Desk
           </button>
         </div>
       </div>
@@ -112,92 +112,56 @@ export default function VersionHistory({onNavigate}: NavigationProps) {
   }
 
   return (
-    <div className="flex h-screen bg-parchment text-ink overflow-hidden">
-      <aside className="w-[340px] bg-sepia-low border-r border-oak-variant flex flex-col">
-        <div className="p-6 border-b border-oak-variant">
-          <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">{activeProject.name}</p>
-          <h1 className="text-2xl font-serif italic text-primary flex items-center gap-2 mt-1">
-            <History className="w-5 h-5" />
-            Version History
-          </h1>
-        </div>
-
-        <div className="p-4 border-b border-oak-variant space-y-3">
-          <div className="flex gap-2">
-            <input className="flex-1 bg-sepia-high border border-oak-variant p-2 rounded-sm text-xs" placeholder="Snapshot label" value={label} onChange={(e) => setLabel(e.target.value)} />
-            <button type="button" className="px-3 bg-primary text-parchment rounded-sm disabled:opacity-50" onClick={() => void createSnapshot()} disabled={isCreating} title="New snapshot">
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-1 text-[10px] font-sans uppercase tracking-widest">
-            {['Whole manuscript', 'Current chapter', 'Current scene'].map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`px-2 py-2 rounded-sm border ${scope === value ? 'bg-amber-wax-container text-parchment border-primary' : 'bg-sepia-high border-oak-variant text-ink-muted'}`}
-                onClick={() => setScope(value)}
-              >
-                {value.replace('Current ', '')}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          {Object.entries(grouped).map(([day, rows]) => (
-            <section key={day}>
-              <h2 className="text-[10px] font-sans uppercase tracking-widest text-ink-muted mb-2">{day}</h2>
-              <div className="space-y-2">
-                {rows.map((snapshot) => {
-                  const id = String(snapshot.id ?? '');
-                  const selected = id === selectedA || id === selectedB;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`w-full border rounded-sm p-3 text-left hover:border-primary ${selected ? 'border-primary bg-sepia-highest' : 'border-oak-variant bg-sepia-high'}`}
-                      onClick={() => {
-                        if (!selectedA || selectedA === id) setSelectedA(id);
-                        else setSelectedB(id);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-serif text-ink">{snapshot.label || 'Autosave'}</span>
-                        <span className="text-[10px] text-ink-muted font-sans">{timeLabel(snapshot.created_at)}</span>
-                      </div>
-                      <p className="mt-1 text-[10px] font-mono text-ink-muted truncate">{snapshot.snapshot_dir ?? id}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-          {snapshots.length === 0 ? <p className="text-sm text-ink-muted italic">No snapshots yet. Create one to capture manuscript and story wiki folders.</p> : null}
-
-          <section className="border-t border-oak-variant pt-5">
-            <h2 className="text-[10px] font-sans uppercase tracking-widest text-ink-muted mb-2">Branches</h2>
-            <div className="space-y-2 opacity-60">
-              {['Aria arc variant', 'Ch.5 darker version'].map((branch) => (
-                <button key={branch} type="button" disabled className="w-full flex items-center gap-2 border border-oak-variant bg-sepia-high p-3 rounded-sm text-left text-sm">
-                  <GitBranch className="w-4 h-4" />
-                  {branch}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      </aside>
-
-      <main className="flex-1 overflow-y-auto">
+    <div className="min-h-screen bg-parchment text-ink">
+      <main>
         <SecondaryPageNav
-          eyebrow={`View: Main Branch · ${scope}`}
-          title="Artifacts & Version History"
+          eyebrow={scope}
+          title="Versions"
           projectName={activeProject.name}
+          active="wiki"
           onNavigate={onNavigate}
         />
 
-        <section className="p-8 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <section className="mx-auto max-w-[1180px] space-y-5 px-5 py-6 md:px-8">
+          <div className="rounded-sm border border-oak-variant bg-sepia-low p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="font-serif text-xl italic text-primary">Create a snapshot</h2>
+                <p className="mt-1 text-sm text-ink-muted">Capture the manuscript and reference notes before a risky edit.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  className="h-10 min-w-56 rounded-sm border border-oak-variant bg-parchment-bright px-3 text-xs outline-none focus:border-primary"
+                  placeholder="Snapshot label"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="flex h-10 items-center gap-2 rounded-sm bg-primary px-4 font-sans text-xs uppercase tracking-widest text-parchment disabled:opacity-50"
+                  onClick={() => void createSnapshot()}
+                  disabled={isCreating}
+                >
+                  <Plus className="w-4 h-4" />
+                  {isCreating ? 'Saving' : 'New snapshot'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-sans uppercase tracking-widest">
+              {['Whole manuscript', 'Current chapter', 'Current scene'].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`rounded-sm border px-3 py-2 ${scope === value ? 'border-primary bg-sepia-highest text-primary' : 'border-oak-variant bg-parchment-bright text-ink-muted hover:text-ink'}`}
+                  onClick={() => setScope(value)}
+                >
+                  {value.replace('Current ', '')}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="border border-oak-variant bg-sepia-low p-5 rounded-sm">
               <Clock3 className="w-5 h-5 text-oak mb-3" />
               <div className="text-2xl font-serif text-primary">{snapshots.length}</div>
@@ -211,75 +175,109 @@ export default function VersionHistory({onNavigate}: NavigationProps) {
             <div className="border border-oak-variant bg-sepia-low p-5 rounded-sm">
               <SplitSquareHorizontal className="w-5 h-5 text-oak mb-3" />
               <div className="text-2xl font-serif text-primary">{stats?.chars.toLocaleString() ?? '—'}</div>
-              <p className="text-xs text-ink-muted uppercase tracking-widest">project md chars</p>
+              <p className="text-xs text-ink-muted uppercase tracking-widest">reference chars</p>
             </div>
           </div>
 
-          <div className="border border-oak-variant bg-sepia-low rounded-sm p-6">
-            <div className="flex items-center justify-between gap-4 mb-5">
-              <div>
-                <h3 className="text-xl font-serif italic">Selected snapshots</h3>
-                <p className="text-sm text-ink-muted">Select two entries from the list to prepare a compare.</p>
+          <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <section className="rounded-sm border border-oak-variant bg-sepia-low p-4">
+              <h2 className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">Snapshots</h2>
+              <div className="mt-3 max-h-[420px] space-y-5 overflow-y-auto pr-1">
+                {Object.entries(grouped).map(([day, rows]) => (
+                  <section key={day}>
+                    <h3 className="mb-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted">{day}</h3>
+                    <div className="space-y-2">
+                      {rows.map((snapshot) => {
+                        const id = String(snapshot.id ?? '');
+                        const selected = id === selectedA || id === selectedB;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`w-full rounded-sm border p-3 text-left hover:border-primary ${selected ? 'border-primary bg-sepia-highest' : 'border-oak-variant bg-parchment-bright'}`}
+                            onClick={() => {
+                              if (!selectedA || selectedA === id) setSelectedA(id);
+                              else setSelectedB(id);
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-sm font-serif text-ink">{snapshot.label || 'Autosave'}</span>
+                              <span className="font-sans text-[10px] text-ink-muted">{timeLabel(snapshot.created_at)}</span>
+                            </div>
+                            <p className="mt-1 truncate font-mono text-[10px] text-ink-muted">{snapshot.snapshot_dir ?? id}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+                {snapshots.length === 0 ? <p className="text-sm text-ink-muted italic">No snapshots yet. Create one before a risky edit.</p> : null}
               </div>
-              <button type="button" disabled className="px-4 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest opacity-50" title="Snapshot diff endpoint is not available yet.">
-                Generate diff
-              </button>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {[selectedA, selectedB].map((selectedId, index) => {
-                const snapshot = snapshots.find((s) => s.id === selectedId);
-                return (
-                  <div key={index} className="min-h-64 border border-oak-variant bg-parchment-bright/40 rounded-sm p-5">
-                    <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted mb-2">{index === 0 ? 'Older' : 'Newer'}</p>
-                    {snapshot ? (
-                      <>
-                        <h4 className="text-2xl font-serif text-primary">{snapshot.label || 'Autosave'}</h4>
-                        <p className="text-sm text-ink-muted mt-2">{dayLabel(snapshot.created_at)} · {timeLabel(snapshot.created_at)}</p>
-                        <p className="text-xs font-mono text-ink-muted mt-4 break-all">{snapshot.snapshot_dir}</p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-ink-muted italic">Select a snapshot.</p>
-                    )}
+            </section>
+
+            <section className="space-y-5">
+              <div className="rounded-sm border border-oak-variant bg-sepia-low p-5">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-serif text-xl italic">Selected snapshots</h3>
+                    <p className="text-sm text-ink-muted">Choose two entries to prepare a compare.</p>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="border border-oak-variant bg-sepia-high rounded-sm p-6">
-            <div className="flex items-start gap-3">
-              <RotateCcw className="w-5 h-5 text-oak shrink-0" />
-              <div>
-                <h3 className="font-serif text-lg italic">Restore and branch controls</h3>
-                <p className="text-sm text-ink-muted mt-1">
-                  Snapshot creation, browsing, restore, and delete are live. Paragraph-level restore, branch switching, merge, export, and diff generation still need deeper backend support.
-                </p>
+                  <button type="button" disabled className="rounded-sm border border-oak-variant px-4 py-2 text-xs uppercase tracking-widest opacity-50" title="Snapshot diff endpoint is not available yet.">
+                    Generate diff
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  {[selectedA, selectedB].map((selectedId, index) => {
+                    const snapshot = snapshots.find((s) => s.id === selectedId);
+                    return (
+                      <div key={index} className="min-h-52 rounded-sm border border-oak-variant bg-parchment-bright/40 p-5">
+                        <p className="mb-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted">{index === 0 ? 'Older' : 'Newer'}</p>
+                        {snapshot ? (
+                          <>
+                            <h4 className="text-2xl font-serif text-primary">{snapshot.label || 'Autosave'}</h4>
+                            <p className="mt-2 text-sm text-ink-muted">{dayLabel(snapshot.created_at)} · {timeLabel(snapshot.created_at)}</p>
+                            <p className="mt-4 break-all font-mono text-xs text-ink-muted">{snapshot.snapshot_dir}</p>
+                          </>
+                        ) : (
+                          <p className="text-sm italic text-ink-muted">Select a snapshot.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={!selectedB || isRestoring}
-                className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest hover:border-primary disabled:opacity-50"
-                onClick={() => void restoreSelected()}
-              >
-                {isRestoring ? 'Restoring...' : 'Restore snapshot'}
-              </button>
-              <button type="button" disabled className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest opacity-50">
-                Branch from here
-              </button>
-              <button type="button" disabled className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest opacity-50">
-                Export plain text
-              </button>
-              <button
-                type="button"
-                disabled={!selectedB}
-                className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest text-red-200 hover:border-red-300 disabled:opacity-50"
-                onClick={() => void deleteSelected()}
-              >
-                Delete snapshot
-              </button>
-            </div>
+
+              <div className="rounded-sm border border-oak-variant bg-sepia-high p-5">
+                <div className="flex items-start gap-3">
+                  <RotateCcw className="w-5 h-5 text-oak shrink-0" />
+                  <div>
+                    <h3 className="font-serif text-lg italic">Recovery controls</h3>
+                    <p className="mt-1 text-sm text-ink-muted">Restore and delete are available after selecting a newer snapshot. Compare and export stay disabled until backend support exists.</p>
+                  </div>
+                </div>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!selectedB || isRestoring}
+                    className="rounded-sm border border-oak-variant px-3 py-2 text-xs uppercase tracking-widest hover:border-primary disabled:opacity-50"
+                    onClick={() => void restoreSelected()}
+                  >
+                    {isRestoring ? 'Restoring...' : 'Restore snapshot'}
+                  </button>
+                  <button type="button" disabled className="rounded-sm border border-oak-variant px-3 py-2 text-xs uppercase tracking-widest opacity-50">
+                    Export plain text
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedB}
+                    className="rounded-sm border border-oak-variant px-3 py-2 text-xs uppercase tracking-widest text-red-900 hover:border-red-600 disabled:opacity-50"
+                    onClick={() => void deleteSelected()}
+                  >
+                    Delete snapshot
+                  </button>
+                </div>
+              </div>
+            </section>
           </div>
 
           {selectedSnapshots.length > 0 ? (

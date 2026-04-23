@@ -2,14 +2,43 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from liteauthor_agent.context_engine.builder import build_scene_packet
-from liteauthor_agent.llm_gateway.client import chat_completion
+from liteauthor_agent.llm_gateway.client import chat_completion, inline_completion
 from liteauthor_agent.prompt_templates.zen import zen_system_prompt
 from liteauthor_agent.schemas.context import SceneExcerpt
 
 from ..database import connect_project_db, get_project_root
-from ..schemas import ZenAIRequest
+from ..schemas import AutocompleteRequest, ZenAIRequest
 
 router = APIRouter(prefix="/api/projects/{project_id}/ai", tags=["ai"])
+
+
+def _clean_inline_completion(text: str) -> str:
+    cleaned = text.strip().strip('"')
+    cleaned = cleaned.split("\n", 1)[0]
+    return cleaned[:80].rstrip()
+
+
+def _autocomplete_prompt(body: AutocompleteRequest) -> str:
+    style = body.documentMemory.strip() or "Continue naturally in the same prose style."
+    parts = [
+        "<STYLE>",
+        style,
+        "</STYLE>",
+    ]
+    if body.previousParagraph.strip():
+        parts.extend(["<PREVIOUS>", body.previousParagraph.strip(), "</PREVIOUS>"])
+    parts.extend(
+        [
+            "<BEFORE>",
+            body.before.strip(),
+            "</BEFORE>",
+            "<AFTER>",
+            body.after.strip(),
+            "</AFTER>",
+            "<CONTINUE>",
+        ],
+    )
+    return "\n".join(parts)
 
 
 def _scene_excerpt(root: Path, scene_id: str) -> SceneExcerpt | None:
@@ -56,3 +85,15 @@ async def zen_ai(project_id: str, body: ZenAIRequest):
             "chunks_used": packet["chunks_used"],
         },
     }
+
+
+@router.post("/autocomplete")
+async def autocomplete_ai(project_id: str, body: AutocompleteRequest):
+    _ = project_id
+    if len(body.before.strip()) < 5:
+        return {"text": ""}
+    try:
+        text = await inline_completion(_autocomplete_prompt(body), max_tokens=24)
+    except Exception as e:
+        raise HTTPException(502, f"Model error: {e!s}") from e
+    return {"text": _clean_inline_completion(text)}

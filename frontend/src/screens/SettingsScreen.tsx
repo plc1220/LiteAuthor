@@ -3,12 +3,12 @@ import {Bot, Database, Eye, FileText, Keyboard, Palette, Save, Settings, ShieldC
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
 
-type Section = 'Editor' | 'AI & Models' | 'Story Wiki' | 'Continuity Engine' | 'Appearance' | 'Keyboard Shortcuts' | 'Data & Storage';
+type Section = 'Editor' | 'AI & Models' | 'Reference Notes' | 'Continuity Engine' | 'Appearance' | 'Keyboard Shortcuts' | 'Data & Storage';
 
 const sections: {name: Section; icon: typeof SlidersHorizontal}[] = [
   {name: 'Editor', icon: SlidersHorizontal},
   {name: 'AI & Models', icon: Bot},
-  {name: 'Story Wiki', icon: FileText},
+  {name: 'Reference Notes', icon: FileText},
   {name: 'Continuity Engine', icon: ShieldCheck},
   {name: 'Appearance', icon: Palette},
   {name: 'Keyboard Shortcuts', icon: Keyboard},
@@ -132,7 +132,7 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
 
   const wikiSection = (
     <>
-      <Row label="Wiki storage path" detail="Markdown story bible root for this project.">
+      <Row label="Reference folder" detail="Local story reference folder for this project.">
         <input readOnly className="w-full max-w-xl bg-sepia-high border border-oak-variant p-2 rounded-sm text-xs font-mono text-ink-muted" value={wikiPath} />
       </Row>
       <Row label="Auto-suggest wiki updates" detail="Prompt after chapter completion."><Toggle checked={autoWiki} onChange={setAutoWiki} /></Row>
@@ -159,7 +159,7 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
     </div>
   );
 
-  const content = section === 'Editor' ? editorSection : section === 'AI & Models' ? aiSection : section === 'Story Wiki' ? wikiSection : section === 'Continuity Engine' ? continuitySection : placeholderSection;
+  const content = section === 'Editor' ? editorSection : section === 'AI & Models' ? aiSection : section === 'Reference Notes' ? wikiSection : section === 'Continuity Engine' ? continuitySection : placeholderSection;
 
   return (
     <div className="flex h-screen bg-parchment text-ink overflow-hidden">

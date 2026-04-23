@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_registry
-from .routers import agent, ai, continuity, manuscript, projects, search, snapshots, suggestions, timeline, wiki
+from .routers import agent, ai, canvas, continuity, manuscript, projects, search, snapshots, suggestions, timeline, wiki
 
 init_registry()
 
@@ -20,6 +20,7 @@ app.include_router(projects.router)
 app.include_router(manuscript.router)
 app.include_router(wiki.router)
 app.include_router(timeline.router)
+app.include_router(canvas.router)
 app.include_router(ai.router)
 app.include_router(suggestions.router)
 app.include_router(continuity.router)

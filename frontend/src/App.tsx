@@ -3,6 +3,7 @@ import {motion, AnimatePresence} from 'motion/react';
 import {Screen, TransitionType} from './types';
 import LibraryHome from './screens/LibraryHome';
 import StoryWikiHub from './screens/StoryWikiHub';
+import StoryCanvas from './screens/StoryCanvas';
 import TimelineView from './screens/TimelineView';
 import AgentMode from './screens/AgentMode';
 import ZenEditor from './screens/ZenEditor';
@@ -48,6 +49,8 @@ export default function App() {
         return <LibraryHome {...props} />;
       case 'StoryWikiHub':
         return <StoryWikiHub {...props} />;
+      case 'StoryCanvas':
+        return <StoryCanvas {...props} />;
       case 'TimelineView':
         return <TimelineView {...props} />;
       case 'AgentMode':
