@@ -149,7 +149,7 @@ function ProjectCard({
   return (
     <article className="group relative overflow-hidden rounded-soft border border-oak-variant bg-sepia-low transition-all hover:-translate-y-1 hover:border-primary/45 hover:bg-sepia-mid">
       <button type="button" className="block w-full text-left bg-transparent border-none p-0 cursor-pointer" onClick={onOpen}>
-        <div className="relative h-[180px] overflow-hidden" style={{backgroundColor: coverColor}}>
+        <div className="relative h-[150px] overflow-hidden" style={{backgroundColor: coverColor}}>
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(255,255,255,0.16),transparent_34%),linear-gradient(135deg,rgba(0,0,0,0.05),rgba(0,0,0,0.38))]" />
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="font-serif text-6xl text-white/85 drop-shadow-sm">{titleInitials(project.name)}</span>
@@ -235,7 +235,7 @@ function CreateProjectCard({onCreate}: {onCreate: () => void}) {
   return (
     <button
       type="button"
-      className="flex min-h-[322px] flex-col items-center justify-center rounded-soft border border-dashed border-primary/45 bg-sepia-low/45 p-8 text-center transition-all hover:-translate-y-1 hover:border-primary hover:bg-sepia-mid"
+      className="flex min-h-[292px] flex-col items-center justify-center rounded-soft border border-dashed border-primary/45 bg-sepia-low/45 p-8 text-center transition-all hover:-translate-y-1 hover:border-primary hover:bg-sepia-mid"
       onClick={onCreate}
     >
       <span className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-primary/35 bg-primary/10 text-primary">
@@ -346,10 +346,10 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
         </div>
       ) : null}
 
-      <main className="flex-1 overflow-y-auto pb-28">
+      <main className="flex-1 overflow-y-auto pb-24">
         <section className="border-b border-oak-variant bg-sepia-low">
-          <div className="mx-auto flex min-h-[280px] max-w-7xl flex-col justify-center px-6 py-12 md:px-10">
-            <div className="flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
+          <div className="mx-auto flex min-h-[220px] max-w-[1680px] flex-col justify-center px-6 py-9 md:px-12 xl:px-16">
+            <div className="flex flex-col gap-7 md:flex-row md:items-end md:justify-between">
               <div>
                 <div className="mb-4 flex items-center gap-2 text-[10px] font-sans uppercase tracking-widest text-primary">
                   <Sparkles className="h-4 w-4" />
@@ -387,8 +387,8 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
           </div>
         </section>
 
-        <section className="mx-auto max-w-7xl px-6 py-8 md:px-10">
-          <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <section className="mx-auto max-w-[1680px] px-6 py-7 md:px-12 xl:px-16">
+          <div className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
               {FILTERS.map((item) => (
                 <button
@@ -406,7 +406,7 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
               ))}
             </div>
 
-            <label className="relative block w-full lg:w-80">
+            <label className="relative block w-full lg:w-[420px] xl:w-[448px]">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oak" />
               <input
                 className="w-full rounded-sm border border-oak-variant bg-sepia-low py-3 pl-10 pr-3 text-sm outline-none placeholder:text-ink-muted/70 focus:border-primary/60"
@@ -440,7 +440,7 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
               <p className="mt-2 text-sm text-ink-muted">Try another search term or switch filters.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-[repeat(auto-fill,minmax(320px,360px))]">
               {visibleProjects.map((project) => (
                 <ProjectCard
                   key={project.id}
@@ -458,7 +458,7 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
       </main>
 
       <aside className="fixed inset-x-0 bottom-0 border-t border-oak-variant bg-sepia-highest/95">
-        <div className={`mx-auto flex max-w-7xl items-center gap-4 px-6 transition-[height] md:px-10 ${activityCollapsed ? 'h-11' : 'h-[72px]'}`}>
+        <div className={`mx-auto flex max-w-[1680px] items-center gap-4 px-6 transition-[height] md:px-12 xl:px-16 ${activityCollapsed ? 'h-11' : 'h-16'}`}>
           <button
             type="button"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-oak-variant bg-sepia-high hover:border-primary/50"

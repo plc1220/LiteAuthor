@@ -50,9 +50,9 @@ export default function TimelineView({onNavigate}: NavigationProps) {
     return (
       <div className="flex h-screen items-center justify-center bg-parchment text-ink px-6 text-center gap-4">
         <div>
-          <p className="font-serif text-lg italic mb-4">Select a project from Story Wiki first.</p>
+          <p className="font-serif text-lg italic mb-4">Select a project from the Project Desk first.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Story Wiki
+            Project Desk
           </button>
         </div>
       </div>
@@ -73,7 +73,7 @@ export default function TimelineView({onNavigate}: NavigationProps) {
           </button>
           <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
             <Users className="w-4 h-4" />
-            <span>Characters</span>
+            <span>Project Desk</span>
           </button>
           <div className="w-full flex items-center gap-3 px-4 py-3 bg-sepia-highest text-primary font-bold rounded-r-full text-sm">
             <Clock className="w-4 h-4" />
@@ -81,7 +81,7 @@ export default function TimelineView({onNavigate}: NavigationProps) {
           </div>
           <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
             <BookOpen className="w-4 h-4" />
-            <span>World Bible</span>
+            <span>Reference Notes</span>
           </button>
         </nav>
         <div className="px-6 py-4 space-y-2">
@@ -105,7 +105,7 @@ export default function TimelineView({onNavigate}: NavigationProps) {
           <div className="flex items-center gap-4">
             <div className="text-2xl font-bold italic">Manuscript</div>
             <div className="h-4 w-px bg-oak-variant" />
-            <div className="text-ink-muted font-sans text-[10px] uppercase tracking-widest">Project &gt; Timeline</div>
+            <div className="text-ink-muted font-sans text-[10px] uppercase tracking-widest">Project Desk / Timeline</div>
           </div>
           <div className="flex items-center gap-4">
             <History className="w-5 h-5 text-ink-muted" />
@@ -236,10 +236,6 @@ export default function TimelineView({onNavigate}: NavigationProps) {
           </aside>
         </div>
       </main>
-
-      <button type="button" className="fixed bottom-8 right-8 w-14 h-14 bg-amber-wax text-parchment-bright rounded-full flex items-center justify-center shadow-lg border-none cursor-pointer" title="Placeholder">
-        <Plus className="w-6 h-6" />
-      </button>
     </div>
   );
 }

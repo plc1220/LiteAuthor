@@ -1,5 +1,23 @@
 const API_BASE = '';
 
+export type AutocompleteBody = {
+  before: string;
+  after?: string;
+  previousParagraph?: string;
+  documentMemory?: string;
+};
+
+type AutocompleteBridge = {
+  complete: (body: AutocompleteBody) => Promise<{text: string} | string>;
+  cancel?: () => void;
+};
+
+declare global {
+  interface Window {
+    liteauthorAutocomplete?: AutocompleteBridge;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -14,6 +32,26 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+async function bridgeAutocomplete(body: AutocompleteBody, signal?: AbortSignal): Promise<{text: string} | null> {
+  const bridge = typeof window !== 'undefined' ? window.liteauthorAutocomplete : undefined;
+  if (!bridge) return null;
+  if (signal?.aborted) throw new DOMException('Autocomplete request was cancelled.', 'AbortError');
+  let abortListener: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_, reject) => {
+    abortListener = () => {
+      bridge.cancel?.();
+      reject(new DOMException('Autocomplete request was cancelled.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', abortListener, {once: true});
+  });
+  try {
+    const result = await Promise.race([bridge.complete(body), abortPromise]);
+    return typeof result === 'string' ? {text: result} : result;
+  } finally {
+    if (abortListener) signal?.removeEventListener('abort', abortListener);
+  }
 }
 
 export type Project = {
@@ -32,6 +70,58 @@ export type Scene = {
   title: string;
   slug: string;
   file_rel_path: string;
+};
+
+export type CanvasNode = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string | null;
+  label?: string | null;
+  color?: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type CanvasEdge = {
+  id: string;
+  fromNode: string;
+  toNode: string;
+  label?: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type StoryCanvas = {
+  version: string;
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  metadata: Record<string, unknown>;
+};
+
+export type CaptureProposal = {
+  id: string;
+  kind: string;
+  title: string;
+  target: string;
+  content: string;
+  source_node_ids: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StoryCanvasApiResult = {
+  canvas?: StoryCanvas;
+  proposals?: CaptureProposal[];
+  artifacts?: unknown[];
+  hints?: unknown[];
+  semantic_hints?: unknown[];
+  summary?: string;
+  message?: string;
+  capture?: string;
+  review?: string;
+  applied?: boolean;
+  items?: {kind: string; target: string}[];
 };
 
 export const api = {
@@ -113,6 +203,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  getCanvas: (projectId: string) => apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`),
+  putCanvas: (projectId: string, canvas: StoryCanvas) =>
+    apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`, {
+      method: 'PUT',
+      body: JSON.stringify(canvas),
+    }),
+  canvasAnalyze: (projectId: string, body: {title?: string; text: string; [key: string]: unknown}) =>
+    apiFetch<StoryCanvasApiResult>(
+      `/api/projects/${projectId}/canvas/analyze`,
+      {
+        method: 'POST',
+        body: JSON.stringify({title: body.title ?? 'Artifact', ...body}),
+      },
+    ),
+  canvasAutosort: (projectId: string, body: {canvas?: StoryCanvas; mode: string; [key: string]: unknown}) =>
+    apiFetch<StoryCanvasApiResult>(`/api/projects/${projectId}/canvas/autosort`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  canvasCapture: (projectId: string, body: {proposals?: CaptureProposal[]; apply?: boolean; [key: string]: unknown}) =>
+    apiFetch<StoryCanvasApiResult>(
+      `/api/projects/${projectId}/canvas/capture`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
   zenAi: (
     projectId: string,
     body: {
@@ -128,6 +245,19 @@ export const api = {
       packet_meta: { approx_tokens: number; chunks_used: number };
       context_packet?: { markdown: string; approx_tokens: number; chunks_used: number };
     }>(`/api/projects/${projectId}/ai/zen`, { method: 'POST', body: JSON.stringify(body) }),
+  autocompleteAi: (
+    projectId: string,
+    body: AutocompleteBody,
+    signal?: AbortSignal,
+  ) => {
+    const bridged = bridgeAutocomplete(body, signal);
+    if (typeof window !== 'undefined' && window.liteauthorAutocomplete) return bridged as Promise<{text: string}>;
+    return apiFetch<{ text: string }>(`/api/projects/${projectId}/ai/autocomplete`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    });
+  },
   listSuggestions: (projectId: string, sceneId?: string) => {
     const q = sceneId ? `?scene_id=${encodeURIComponent(sceneId)}` : '';
     return apiFetch<Record<string, unknown>[]>(`/api/projects/${projectId}/suggestions${q}`);

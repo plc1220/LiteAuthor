@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {BookOpen, Layers3, Pencil, Plus, Save, Search, Sparkles, TriangleAlert} from 'lucide-react';
+import {BookOpen, Search, Sparkles, TriangleAlert} from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
 import {SecondaryPageNav} from '../components/SecondaryPageNav';
@@ -65,7 +65,6 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
   const [motifsMarkdown, setMotifsMarkdown] = useState('');
   const [selectedName, setSelectedName] = useState('');
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
   const [loadState, setLoadState] = useState('Loading motifs...');
 
   useEffect(() => {
@@ -80,10 +79,9 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
         setSelectedName((current) => current || first);
         setLoadState('');
       } catch {
-        const starter = '# Motifs and Themes\n\n## Light\nHow light changes meaning across the manuscript.\n\n## Letters\nMessages, secrets, and delayed knowledge.\n';
-        setMotifsMarkdown(starter);
-        setSelectedName('Light');
-        setLoadState('motifs.md has not been created yet; saving will create it.');
+        setMotifsMarkdown('');
+        setSelectedName('');
+        setLoadState('No motif notes have been created yet.');
       }
     })();
   }, [activeProject, refreshOutline]);
@@ -120,7 +118,7 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
               });
             }
           } catch {
-            // Scene scanning is best-effort; the wiki remains editable even if a scene file is missing.
+            // Scene scanning is best-effort; motif notes remain readable even if a scene file is missing.
           }
         }),
       );
@@ -142,32 +140,13 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
 
   const overused = heat.filter((h) => h.count > 3);
 
-  const saveMotifs = async () => {
-    if (!activeProject) return;
-    setIsSaving(true);
-    try {
-      await api.wikiPut(activeProject.id, MOTIFS_PATH, motifsMarkdown);
-      setLoadState('Saved to story/motifs.md');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const addMotif = () => {
-    const name = window.prompt('Motif name');
-    if (!name?.trim()) return;
-    const block = `\n\n## ${name.trim()}\nDescribe what this motif means, where it should evolve, and which character arcs it touches.\n`;
-    setMotifsMarkdown((current) => `${current.trimEnd()}${block}`);
-    setSelectedName(name.trim());
-  };
-
   if (!activeProject) {
     return (
       <div className="flex h-screen items-center justify-center bg-parchment text-ink px-6 text-center">
         <div>
           <p className="font-serif text-lg italic mb-4">Select a project before opening motifs.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Story Wiki
+            Project Desk
           </button>
         </div>
       </div>
@@ -175,89 +154,59 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-parchment text-ink">
-      <aside className="w-72 bg-sepia-low border-r border-oak-variant flex flex-col">
-        <div className="p-6 border-b border-oak-variant">
-          <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Story Wiki</p>
-          <h1 className="text-2xl font-serif italic text-primary mt-1">Motifs</h1>
-        </div>
-        <nav className="p-4 space-y-2">
-          <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-sm text-ink-muted hover:bg-sepia-high bg-transparent border-none text-left" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            <BookOpen className="w-4 h-4" />
-            Story Bible
-          </button>
-          <div className="w-full flex items-center gap-3 px-4 py-3 text-sm bg-sepia-highest text-primary font-bold rounded-r-full">
-            <Layers3 className="w-4 h-4" />
-            Motif Map
-          </div>
-        </nav>
-        <div className="px-6 py-4 mt-auto border-t border-oak-variant text-xs text-ink-muted">
-          {loadState || 'Scanning scene text for recurrence counts.'}
-        </div>
-      </aside>
-
-      <main className="flex-1 overflow-y-auto">
+    <div className="min-h-screen bg-parchment text-ink">
+      <main>
         <SecondaryPageNav
-          eyebrow="Explicit canon"
-          title="Motif & Theme Panel"
+          eyebrow="Plan"
+          title="Motifs"
           projectName={activeProject.name}
           active="wiki"
           onNavigate={onNavigate}
-          actions={
-            <>
-            <button type="button" className="px-4 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest flex items-center gap-2" onClick={addMotif}>
-              <Plus className="w-4 h-4" />
-              Add motif
-            </button>
-            <button type="button" className="px-4 py-2 bg-primary text-parchment rounded-sm text-xs uppercase tracking-widest flex items-center gap-2 disabled:opacity-50" onClick={() => void saveMotifs()} disabled={isSaving}>
-              <Save className="w-4 h-4" />
-              {isSaving ? 'Saving' : 'Save'}
-            </button>
-            </>
-          }
         />
 
-        <section className="px-8 py-8 border-b border-oak-variant bg-parchment-dim">
-          <div className="flex flex-wrap gap-3">
-            {motifs.map((motif) => {
-              const total = occurrences.filter((o) => o.count > 0 && motif.name === selected?.name).reduce((sum, o) => sum + o.count, 0);
-              const selectedMotif = motif.name === selected?.name;
-              return (
-                <button
-                  key={motif.name}
-                  type="button"
-                  className={`px-4 py-2 rounded-full border text-sm font-serif ${
-                    selectedMotif ? 'border-primary bg-amber-wax-container text-parchment' : 'border-oak-variant bg-sepia-high text-ink hover:border-primary'
-                  }`}
-                  onClick={() => setSelectedName(motif.name)}
-                >
-                  {motif.name}
-                  {selectedMotif && total > 0 ? <span className="ml-2 font-sans text-[10px]">{total}</span> : null}
-                </button>
-              );
-            })}
-            {motifs.length === 0 ? <span className="text-sm text-ink-muted italic">Add headings like “## Mirrors” to story/motifs.md.</span> : null}
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px] gap-8 p-8">
-          <section className="space-y-6">
-            <div className="border border-oak-variant bg-sepia-low p-6 rounded-sm">
-              <div className="flex items-start justify-between gap-6">
-                <div>
-                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Selected</p>
-                  <h3 className="text-4xl font-serif italic text-primary mt-1">{selected?.name ?? 'No motif selected'}</h3>
-                </div>
-                <button type="button" disabled className="px-4 py-2 rounded-sm border border-oak-variant text-xs uppercase tracking-widest opacity-50 flex items-center gap-2" title="AI echo opens Suggestion Panel after integration.">
-                  <Sparkles className="w-4 h-4" />
-                  Echo in selection
-                </button>
-              </div>
-              <p className="mt-6 text-sm leading-relaxed text-ink-muted whitespace-pre-wrap">{selected?.description || 'Write a description in the markdown editor.'}</p>
+        <div className="mx-auto max-w-[1180px] px-5 py-6 md:px-8">
+          <section className="mb-5 border-b border-oak-variant pb-5">
+            <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">{loadState || 'Scanning scene text for recurrence counts.'}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {motifs.map((motif) => {
+                const total = occurrences.filter((o) => o.count > 0 && motif.name === selected?.name).reduce((sum, o) => sum + o.count, 0);
+                const selectedMotif = motif.name === selected?.name;
+                return (
+                  <button
+                    key={motif.name}
+                    type="button"
+                    className={`rounded-sm border px-3 py-2 text-sm font-serif ${
+                      selectedMotif ? 'border-primary bg-sepia-highest text-primary' : 'border-oak-variant bg-sepia-low text-ink hover:border-primary'
+                    }`}
+                    onClick={() => setSelectedName(motif.name)}
+                  >
+                    {motif.name}
+                    {selectedMotif && total > 0 ? <span className="ml-2 font-sans text-[10px]">{total}</span> : null}
+                  </button>
+                );
+              })}
+              {motifs.length === 0 ? <span className="text-sm text-ink-muted italic">No motif notes yet. Add them through guided reference tools.</span> : null}
             </div>
+          </section>
+
+          <div className={`grid gap-5 ${motifs.length > 0 ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : 'max-w-[860px]'}`}>
+            <section className="space-y-5">
+              <div className="rounded-sm border border-oak-variant bg-sepia-low p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">Selected</p>
+                    <h3 className="mt-1 text-3xl font-serif italic text-primary">{selected?.name ?? 'No motif selected'}</h3>
+                  </div>
+                  <button type="button" disabled className="flex items-center gap-2 rounded-sm border border-oak-variant px-3 py-2 text-xs uppercase tracking-widest opacity-50" title="AI echo opens Suggestion Panel after integration.">
+                    <Sparkles className="w-4 h-4" />
+                    Echo in selection
+                  </button>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-ink-muted whitespace-pre-wrap">{selected?.description || 'No description has been recorded for this motif yet.'}</p>
+              </div>
 
             {overused.length > 0 ? (
-              <div className="border border-amber-500/40 bg-amber-500/10 p-4 rounded-sm flex gap-3 text-sm">
+              <div className="flex gap-3 rounded-sm border border-amber-wax/40 bg-amber-wax/10 p-4 text-sm">
                 <TriangleAlert className="w-5 h-5 text-amber-wax shrink-0" />
                 <div>
                   <div className="font-bold text-primary">Over-use warning</div>
@@ -266,8 +215,8 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
               </div>
             ) : null}
 
-            <div className="border border-oak-variant bg-sepia-low p-6 rounded-sm">
-              <div className="flex items-center justify-between mb-4">
+            <div className="rounded-sm border border-oak-variant bg-sepia-low p-5">
+              <div className="mb-4 flex items-center justify-between">
                 <h4 className="font-serif text-xl italic">Recurrence heatmap</h4>
                 <span className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">chapter cells</span>
               </div>
@@ -284,7 +233,7 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
               </div>
             </div>
 
-            <div className="border border-oak-variant bg-sepia-low p-6 rounded-sm">
+            <div className="rounded-sm border border-oak-variant bg-sepia-low p-5">
               <div className="flex items-center gap-2 mb-4">
                 <Search className="w-4 h-4 text-oak" />
                 <h4 className="font-serif text-xl italic">All occurrences</h4>
@@ -312,17 +261,25 @@ export default function MotifThemePanel({onNavigate}: NavigationProps) {
             </div>
           </section>
 
-          <aside className="border border-oak-variant bg-sepia-high p-4 rounded-sm h-fit sticky top-28">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="font-serif text-lg italic">Theme Notes</h4>
-              <Pencil className="w-4 h-4 text-oak" />
-            </div>
-            <textarea
-              className="w-full h-[620px] bg-parchment-bright border border-oak-variant rounded-sm p-4 text-xs font-mono text-ink leading-relaxed"
-              value={motifsMarkdown}
-              onChange={(e) => setMotifsMarkdown(e.target.value)}
-            />
-          </aside>
+          {motifs.length > 0 ? (
+            <aside className="h-fit rounded-sm border border-oak-variant bg-sepia-low p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-serif text-lg italic">Theme Notes</h4>
+                <BookOpen className="w-4 h-4 text-oak" />
+              </div>
+              <div className="max-h-[420px] overflow-y-auto rounded-sm border border-oak-variant bg-parchment-bright p-4">
+                <div className="space-y-4">
+                  {motifs.map((motif) => (
+                    <section key={motif.name}>
+                      <h5 className="font-sans text-[10px] font-bold uppercase tracking-widest text-primary">{motif.name}</h5>
+                      <p className="mt-1 whitespace-pre-wrap font-serif text-sm leading-6 text-ink-muted">{motif.description || 'No description recorded.'}</p>
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </aside>
+          ) : null}
+        </div>
         </div>
       </main>
     </div>

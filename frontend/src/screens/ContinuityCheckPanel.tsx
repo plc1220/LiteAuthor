@@ -152,7 +152,7 @@ export default function ContinuityCheckPanel({onNavigate}: NavigationProps) {
         <div>
           <p className="font-serif text-lg italic mb-4">Select a project before checking continuity.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Story Wiki
+            Project Desk
           </button>
         </div>
       </div>
@@ -273,7 +273,7 @@ export default function ContinuityCheckPanel({onNavigate}: NavigationProps) {
                     Go to scene
                   </button>
                   <button type="button" className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest" onClick={() => onNavigate('StoryWikiHub', 'push')}>
-                    Go to wiki
+                    Project desk
                   </button>
                   <button
                     type="button"

@@ -169,3 +169,16 @@ Metadata tags (e.g., "Draft," "Chapter 1") should look like small scraps of pape
 ### Cards
 
 Cards (for story bibles or character notes) should use a "Stacked Paper" effect, where 2-3 offset borders of varying sepia tones create the illusion of a physical stack of index cards.
+
+## First Access Hierarchy
+
+LiteAuthor should never present every capability as equal on first contact. The primary path is always **open a project -> write the current scene -> save/snapshot**. Planning, checking, versioning, and agent work are secondary supports that should appear only when the writer asks for tools or leaves the manuscript flow.
+
+- **Primary surface:** The manuscript editor, current chapter/scene outline, save state, word count, and selection-based writing actions.
+- **Secondary tools:** Story wiki, story canvas, motifs, timeline, continuity, agent passes, and version history. Group these by writer intent: Plan, Check, Preserve.
+- **Project desk rule:** "Project" means the full project desk/overview. It must not route to a page that feels like only the Story Wiki. Story Wiki, Canvas, Timeline, and Motifs are peers under Plan.
+- **Disclosure rule:** When a screen contains more than three destinations, expose one obvious next action and place the rest behind a labeled drawer, panel, or project desk.
+- **Language rule:** Use human writing verbs before system nouns. Prefer "Plan", "Check", and "Preserve" over "Artifacts", "Corpus", or raw database terminology.
+- **Empty-state rule:** A first-time writer should see reassurance and one next step, not a feature inventory.
+
+The design risk here is that power users need one extra click for advanced functions. That is acceptable because LiteAuthor's brand promise is focus; the system should feel like a writing desk with drawers, not a workbench with every tool already laid out.
