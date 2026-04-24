@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 
 from ..database import connect_project_db, get_project_root
-from ..schemas import OutlineOut, ChapterOut, SceneOut, SceneContentUpdate
+from ..schemas import OutlineOut, ChapterOut, SceneOut, SceneContentUpdate, TitleUpdate
 
 router = APIRouter(prefix="/api/projects/{project_id}/manuscript", tags=["manuscript"])
 
@@ -106,6 +106,42 @@ def create_chapter(project_id: str, title: str = Query("New Chapter")):
         )
         conn.commit()
         return {"id": ch_id}
+    finally:
+        conn.close()
+
+
+@router.patch("/chapters/{chapter_id}")
+def patch_chapter_title(project_id: str, chapter_id: str, body: TitleUpdate):
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(400, "Title cannot be empty")
+    root = _root(project_id)
+    conn = connect_project_db(root)
+    try:
+        row = conn.execute("SELECT id FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Chapter not found")
+        conn.execute("UPDATE chapters SET title = ? WHERE id = ?", (title, chapter_id))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@router.patch("/scenes/{scene_id}")
+def patch_scene_title(project_id: str, scene_id: str, body: TitleUpdate):
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(400, "Title cannot be empty")
+    root = _root(project_id)
+    conn = connect_project_db(root)
+    try:
+        row = conn.execute("SELECT id FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Scene not found")
+        conn.execute("UPDATE scenes SET title = ? WHERE id = ?", (title, scene_id))
+        conn.commit()
+        return {"ok": True}
     finally:
         conn.close()
 

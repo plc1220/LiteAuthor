@@ -42,6 +42,10 @@ class SceneContentUpdate(BaseModel):
     markdown: str
 
 
+class TitleUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+
+
 class WikiFileOut(BaseModel):
     path: str
     is_dir: bool
@@ -74,6 +78,18 @@ class EventOut(BaseModel):
     notes: Optional[str]
     has_conflict: bool
     scene_id: Optional[str]
+
+
+class EventPatch(BaseModel):
+    title: Optional[str] = None
+    story_time: Optional[str] = None
+    narrative_order: Optional[int] = None
+    pov: Optional[str] = None
+    participants: Optional[list[str]] = None
+    dependencies: Optional[list[str]] = None
+    notes: Optional[str] = None
+    has_conflict: Optional[bool] = None
+    scene_id: Optional[str] = None
 
 
 class ZenAIRequest(BaseModel):
@@ -176,3 +192,30 @@ class CaptureProposal(BaseModel):
 class CanvasCaptureRequest(BaseModel):
     proposals: list[CaptureProposal]
     apply: bool = False
+
+
+class StorycraftRuleOut(BaseModel):
+    id: str
+    name: str
+    bucket: str
+
+
+class StorycraftRequest(BaseModel):
+    scene_id: str
+    surface: str = "inline_suggestion"
+    intent: str = "rewrite_with_intent"
+    selection: str = ""
+    chapter_position: str | None = None
+    run_model: bool = True
+
+
+class StorycraftAnalyzeOut(BaseModel):
+    diagnosis: list[str]
+    rules: list[StorycraftRuleOut]
+    warnings: list[str]
+    diagnostics: dict[str, Any]
+
+
+class StorycraftRewriteOut(StorycraftAnalyzeOut):
+    rewrite: str
+    packet_meta: dict[str, Any] = Field(default_factory=dict)
