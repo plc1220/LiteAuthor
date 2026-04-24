@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_registry
-from .routers import agent, ai, canvas, continuity, manuscript, projects, search, snapshots, suggestions, timeline, wiki
+from .routers import agent, ai, canvas, continuity, manuscript, projects, search, snapshots, storycraft, suggestions, timeline, wiki
 
 init_registry()
 
@@ -27,6 +27,7 @@ app.include_router(continuity.router)
 app.include_router(agent.router)
 app.include_router(snapshots.router)
 app.include_router(search.router)
+app.include_router(storycraft.router)
 
 
 @app.get("/api/health")

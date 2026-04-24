@@ -16,6 +16,8 @@ def build_scene_packet(
     selection: str,
     instruction: str,
     max_chunks: int = 8,
+    diagnosis: list[str] | None = None,
+    active_storycraft_rules: list[str] | None = None,
 ) -> dict[str, Any]:
     chunks: list[dict[str, str]] = []
     budget = MAX_CONTEXT_CHARS
@@ -54,10 +56,12 @@ def build_scene_packet(
         for p in sorted(char_dir.glob("*.md"))[:3]:
             add_chunk(f"Character: {p.stem}", p.read_text(encoding="utf-8", errors="replace")[:1200], 1200)
 
-    md_parts = [
-        f"# Task\n{task}",
-        f"# Instruction\n{instruction}",
-    ]
+    md_parts: list[str] = [f"# Task\n{task}"]
+    if diagnosis:
+        md_parts.append("# Diagnosis\n" + "\n".join(f"- {d}" for d in diagnosis if d.strip()))
+    if active_storycraft_rules:
+        md_parts.append("# Active Storycraft Rules\n" + "\n".join(active_storycraft_rules))
+    md_parts.append(f"# Instruction\n{instruction}")
     if ch_title:
         md_parts.append(f"# Chapter\n{ch_title}")
     for c in chunks:

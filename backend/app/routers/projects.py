@@ -1,9 +1,11 @@
 import json
+import re
+import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from ..database import create_project_files, get_project_root, list_projects, connect_registry
+from ..database import connect_project_db, create_project_files, get_project_root, list_projects, connect_registry
 from ..schemas import ProjectCreate, ProjectOut
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -72,6 +74,12 @@ def api_get_project(project_id: str):
         reg.close()
 
 
+def _word_count_for_text(s: str) -> int:
+    if not s.strip():
+        return 0
+    return len(re.findall(r"\S+", s))
+
+
 @router.get("/{project_id}/stats")
 def api_project_stats(project_id: str):
     root = Path(get_project_root(project_id))
@@ -92,4 +100,36 @@ def api_project_stats(project_id: str):
             except OSError:
                 pass
     char_count = len(list((root / "story" / "characters").glob("*.md"))) if (root / "story" / "characters").is_dir() else 0
-    return {"chars": chars, "wiki_chars": wiki_chars, "character_files": char_count}
+
+    word_count = 0
+    manuscript = root / "manuscript"
+    if manuscript.is_dir():
+        for p in manuscript.rglob("*.md"):
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            word_count += _word_count_for_text(text)
+
+    open_continuity_flags = 0
+    try:
+        conn = connect_project_db(root)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM continuity_flags WHERE LOWER(COALESCE(status, 'open')) = 'open'",
+            ).fetchone()
+            open_continuity_flags = int(row["n"] or 0) if row is not None else 0
+        except sqlite3.OperationalError:
+            pass
+        finally:
+            conn.close()
+    except OSError:
+        pass
+
+    return {
+        "chars": chars,
+        "wiki_chars": wiki_chars,
+        "character_files": char_count,
+        "word_count": word_count,
+        "open_continuity_flags": open_continuity_flags,
+    }
