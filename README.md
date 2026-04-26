@@ -134,13 +134,24 @@ graphify update .
 
 The repository ignores `graphify-out/cache/`, but the report, JSON, and HTML outputs are intended to be committed so every teammate and assistant gets the same map.
 
-## Local model (OpenAI-compatible)
+## Local model
 
-Configure the **agent** stack (read by `liteauthor_agent.llm_gateway`):
+Configure the **agent** stack (read by `liteauthor_agent.llm_gateway`) for an OpenAI-compatible server:
 
 ```bash
+export LITEAUTHOR_LLM_PROVIDER=openai
 export OPENAI_BASE_URL=http://127.0.0.1:8080/v1
 export OPENAI_MODEL=default
+```
+
+Or run MLX directly in the backend process, without a separate model server:
+
+```bash
+pip install -e './agent[mlx]'
+export LITEAUTHOR_LLM_PROVIDER=mlx
+export MLX_MODEL=Jackrong/MLX-Qwopus3.5-9B-v3-4bit
+export MLX_AUTOCOMPLETE_MODEL=prism-ml/Ternary-Bonsai-8B-mlx-2bit
+export MLX_AUTOCOMPLETE_BACKEND=lm
 ```
 
 Optional: `LITEAUTHOR_MAX_CONTEXT_CHARS` (default `12000`) for scene packet size. See [`.env.example`](.env.example).

@@ -1,9 +1,10 @@
+import asyncio
 import json
 from typing import Any
 
 import httpx
 
-from liteauthor_agent.llm_gateway.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_AUTOCOMPLETE_MODEL, OPENAI_MODEL
+from liteauthor_agent.llm_gateway.config import LLM_PROVIDER, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_AUTOCOMPLETE_MODEL, OPENAI_MODEL
 
 
 def _payload(messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7, model: str | None = None) -> dict[str, Any]:
@@ -16,6 +17,11 @@ def _payload(messages: list[dict[str, str]], max_tokens: int, temperature: float
 
 
 def chat_completion_sync(messages: list[dict[str, str]], max_tokens: int = 2048) -> str:
+    if LLM_PROVIDER == "mlx":
+        from liteauthor_agent.llm_gateway.mlx_client import chat_completion_mlx_sync
+
+        return chat_completion_mlx_sync(messages, max_tokens=max_tokens)
+
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(messages, max_tokens)
     with httpx.Client(timeout=120.0) as client:
@@ -30,6 +36,11 @@ def chat_completion_sync(messages: list[dict[str, str]], max_tokens: int = 2048)
 
 
 async def chat_completion(messages: list[dict[str, str]], max_tokens: int = 2048) -> str:
+    if LLM_PROVIDER == "mlx":
+        from liteauthor_agent.llm_gateway.mlx_client import chat_completion_mlx_sync
+
+        return await asyncio.to_thread(chat_completion_mlx_sync, messages, max_tokens)
+
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(messages, max_tokens)
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -44,6 +55,11 @@ async def chat_completion(messages: list[dict[str, str]], max_tokens: int = 2048
 
 
 async def inline_completion(prompt: str, max_tokens: int = 24) -> str:
+    if LLM_PROVIDER == "mlx":
+        from liteauthor_agent.llm_gateway.mlx_client import inline_completion_mlx_sync
+
+        return await asyncio.to_thread(inline_completion_mlx_sync, prompt, max_tokens)
+
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(
         [{"role": "user", "content": prompt}],
