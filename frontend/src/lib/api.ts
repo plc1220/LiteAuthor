@@ -1,3 +1,5 @@
+import type { StorycraftAnalyzeResult, StorycraftRequestBody, StorycraftRewriteResult } from './storycraft';
+
 const API_BASE = '';
 
 export type AutocompleteBody = {
@@ -131,7 +133,13 @@ export const api = {
     apiFetch<Project>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
   getProject: (id: string) => apiFetch<Project>(`/api/projects/${id}`),
   projectStats: (id: string) =>
-    apiFetch<{ chars: number; wiki_chars: number; character_files: number }>(`/api/projects/${id}/stats`),
+    apiFetch<{
+      chars: number;
+      wiki_chars: number;
+      character_files: number;
+      word_count: number;
+      open_continuity_flags: number;
+    }>(`/api/projects/${id}/stats`),
   outline: (projectId: string) =>
     apiFetch<{ chapters: Chapter[]; scenes: Scene[] }>(`/api/projects/${projectId}/manuscript/outline`),
   getSceneContent: (projectId: string, sceneId: string) =>
@@ -154,6 +162,16 @@ export const api = {
     ),
   deleteScene: (projectId: string, sceneId: string) =>
     apiFetch<{ ok: boolean }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}`, {method: 'DELETE'}),
+  patchChapterTitle: (projectId: string, chapterId: string, title: string) =>
+    apiFetch<{ ok: boolean }>(`/api/projects/${projectId}/manuscript/chapters/${chapterId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({title}),
+    }),
+  patchSceneTitle: (projectId: string, sceneId: string, title: string) =>
+    apiFetch<{ ok: boolean }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({title}),
+    }),
   wikiTree: (projectId: string) => apiFetch<{ path: string; is_dir: boolean }[]>(`/api/projects/${projectId}/wiki/tree`),
   wikiGet: (projectId: string, path: string) =>
     apiFetch<{ path: string; content: string }>(`/api/projects/${projectId}/wiki/file?path=${encodeURIComponent(path)}`),
@@ -203,6 +221,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  patchEvent: (
+    projectId: string,
+    eventId: string,
+    body: {
+      title?: string;
+      story_time?: string | null;
+      narrative_order?: number | null;
+      pov?: string | null;
+      participants?: string[];
+      dependencies?: string[];
+      notes?: string | null;
+      has_conflict?: boolean;
+      scene_id?: string | null;
+    },
+  ) =>
+    apiFetch<{
+      id: string;
+      title: string;
+      story_time: string | null;
+      narrative_order: number | null;
+      pov: string | null;
+      participants: string[];
+      dependencies: string[];
+      notes: string | null;
+      has_conflict: boolean;
+      scene_id: string | null;
+    }>(`/api/projects/${projectId}/timeline/events/${eventId}`, {method: 'PATCH', body: JSON.stringify(body)}),
   getCanvas: (projectId: string) => apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`),
   putCanvas: (projectId: string, canvas: StoryCanvas) =>
     apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`, {
@@ -310,4 +355,14 @@ export const api = {
     }),
   deleteSnapshot: (projectId: string, snapshotId: string) =>
     apiFetch<{ ok: boolean }>(`/api/projects/${projectId}/snapshots/${snapshotId}`, { method: 'DELETE' }),
+  storycraftAnalyze: (projectId: string, body: StorycraftRequestBody) =>
+    apiFetch<StorycraftAnalyzeResult>(`/api/projects/${projectId}/storycraft/analyze`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  storycraftRewrite: (projectId: string, body: StorycraftRequestBody) =>
+    apiFetch<StorycraftRewriteResult>(`/api/projects/${projectId}/storycraft/rewrite`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };

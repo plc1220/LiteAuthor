@@ -640,7 +640,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
             onClick={() => onNavigate('StoryWikiHub', 'push_back')}
           >
             <BookOpen className="w-4 h-4" />
-            Project Desk
+            The Codex
           </button>
         </div>
       </div>
@@ -669,7 +669,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
               onClick={() => onNavigate('StoryWikiHub', 'push_back')}
             >
               <BookOpen className="w-4 h-4" />
-              Project Desk
+              The Codex
             </button>
             <button
               type="button"

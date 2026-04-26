@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BookOpen,
   Map as MapIcon,
@@ -7,12 +7,18 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Download,
   History,
+  Pencil,
   Settings,
   Edit3,
   Save,
   Layers,
+  ScrollText,
   Trash2,
+  UserCheck,
+  Waypoints,
+  Zap,
 } from 'lucide-react';
 import {NavigationProps} from '../types';
 import {AppScaffold} from '../components/AppScaffold';
@@ -50,12 +56,72 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   const [styleChoice, setStyleChoice] = useState('clearer');
   const [customInstruction, setCustomInstruction] = useState('');
   const [toolsOpen, setToolsOpen] = useState(() => localStorage.getItem('liteauthor.editor.toolsOpen') === 'true');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [zenFocus, setZenFocus] = useState(() => localStorage.getItem('liteauthor.editor.zenFocus') === 'true');
+  const [memoryTerms, setMemoryTerms] = useState<string[]>([]);
+  const [entityCard, setEntityCard] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{
+    kind: 'chapter' | 'scene';
+    id: string;
+    value: string;
+  } | null>(null);
+  const skipNextRenameBlur = useRef(false);
+  const mainScrollRef = useRef<HTMLDivElement | null>(null);
   const autocompleteAbort = useRef<AbortController | null>(null);
   const autocompleteRequestId = useRef(0);
+
+  const flushBeforeNav = useCallback(async () => {
+    try {
+      await editorRef.current?.flushSave();
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('liteauthor.editor.toolsOpen', String(toolsOpen));
   }, [toolsOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('liteauthor.editor.zenFocus', String(zenFocus));
+  }, [zenFocus]);
+
+  useEffect(() => {
+    if (zenFocus) setToolsOpen(false);
+  }, [zenFocus]);
+
+  useEffect(() => {
+    if (!activeProject) {
+      setMemoryTerms([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tree = await api.wikiTree(activeProject.id);
+        if (cancelled) return;
+        const terms = tree
+          .filter((e) => /\/(characters|locations)\/[^/]+\.md$/i.test(e.path))
+          .map((e) => e.path.replace(/.*\//, '').replace(/\.md$/, ''))
+          .map((s) => s.replace(/[-_]+/g, ' ').trim());
+        setMemoryTerms([...new Set(terms)].filter((s) => s.length >= 2).slice(0, 50));
+      } catch {
+        if (!cancelled) setMemoryTerms([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject?.id]);
+
+  useEffect(() => {
+    if (!zenFocus) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZenFocus(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zenFocus]);
 
   if (!activeProject || !activeSceneId) {
     return (
@@ -117,6 +183,90 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
   };
 
+  const runStorycraft = async (action: Action) => {
+    if (
+      action !== 'story_tension' &&
+      action !== 'story_dialogue' &&
+      action !== 'story_ending' &&
+      action !== 'story_intent' &&
+      action !== 'story_opening' &&
+      action !== 'story_pacing' &&
+      action !== 'story_character' &&
+      action !== 'story_payoff' &&
+      action !== 'story_lore' &&
+      action !== 'story_addiction' &&
+      action !== 'story_cont_check' &&
+      action !== 'story_planner'
+    ) {
+      return;
+    }
+    const handle = editorRef.current;
+    if (!handle || !activeProject) return;
+    handle.clearGhostText();
+    const sel = handle.getSelection();
+    setLastSelection(sel);
+    const text = sel.text.trim();
+    if (text.length < 2) {
+      setProposal({
+        original: '',
+        proposed: '',
+        explanation: 'Select a sentence or paragraph before running a storycraft outcome.',
+      });
+      return;
+    }
+    const cfg = {
+      story_tension: {intent: 'increase_tension', chapter_position: null as string | null},
+      story_dialogue: {intent: 'sharpen_dialogue', chapter_position: null as string | null},
+      story_ending: {intent: 'strengthen_chapter_ending', chapter_position: 'ending' as const},
+      story_intent: {intent: 'rewrite_with_intent', chapter_position: null as string | null},
+      story_opening: {intent: 'opening_doctor', chapter_position: 'opening' as const},
+      story_pacing: {intent: 'pacing_analyzer', chapter_position: null as string | null},
+      story_character: {intent: 'character_engine', chapter_position: null as string | null},
+      story_payoff: {intent: 'payoff_tracker', chapter_position: null as string | null},
+      story_lore: {intent: 'lore_compression', chapter_position: null as string | null},
+      story_addiction: {intent: 'chapter_addiction', chapter_position: null as string | null},
+      story_cont_check: {intent: 'character_consistency', chapter_position: null as string | null},
+      story_planner: {intent: 'planning_architect', chapter_position: null as string | null},
+    }[action];
+    setAiBusy(true);
+    setProposal(null);
+    setPendingAction(null);
+    try {
+      const res = await api.storycraftRewrite(activeProject.id, {
+        scene_id: activeSceneId,
+        surface: 'inline_suggestion',
+        intent: cfg.intent,
+        selection: text,
+        chapter_position: cfg.chapter_position,
+        run_model: true,
+      });
+      const hint = [res.rewrite && `~${res.packet_meta.approx_tokens ?? 0} tok`].filter(Boolean).join(' ');
+      setProposal({
+        original: text,
+        proposed: (res.rewrite || '').trim(),
+        explanation: [
+          res.diagnosis.length ? res.diagnosis.join(' ') : null,
+          res.warnings.length ? res.warnings.join(' ') : null,
+          res.rules.length ? res.rules.map((r) => r.name).join(', ') : null,
+          hint,
+        ]
+          .filter(Boolean)
+          .join(' — '),
+        task: 'Storycraft outcome',
+        contextPacket: undefined,
+        contextTokens: res.packet_meta.approx_tokens,
+      });
+    } catch (e) {
+      setProposal({
+        original: text,
+        proposed: '',
+        explanation: `Model error: ${(e as Error).message}`,
+      });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   const runAi = async (action: Action, style?: string) => {
     const handle = editorRef.current;
     if (!handle || !activeProject) return;
@@ -169,6 +319,23 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       editorRef.current?.clearGhostText();
       setPendingAction(action);
       setProposal(null);
+      return;
+    }
+    if (
+      action === 'story_tension' ||
+      action === 'story_dialogue' ||
+      action === 'story_ending' ||
+      action === 'story_intent' ||
+      action === 'story_opening' ||
+      action === 'story_pacing' ||
+      action === 'story_character' ||
+      action === 'story_payoff' ||
+      action === 'story_lore' ||
+      action === 'story_addiction' ||
+      action === 'story_cont_check' ||
+      action === 'story_planner'
+    ) {
+      void runStorycraft(action);
       return;
     }
     void runAi(action);
@@ -281,33 +448,107 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         explanation: proposal.explanation,
       }
     : null;
+  const formatLastSaved = (d: Date | null) => {
+    if (!d) return '—';
+    const s = d.getTime() / 1000;
+    const n = Date.now() / 1000;
+    if (n - s < 10) return 'Just now';
+    return d.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  };
+
+  const exportSceneMarkdown = async () => {
+    if (!activeScene) return;
+    try {
+      await editorRef.current?.flushSave();
+      const md = editorRef.current?.getMarkdown() ?? '';
+      const name = (activeScene.slug || activeScene.title || 'scene').replace(/[^a-z0-9-]+/gi, '-');
+      const blob = new Blob([md], {type: 'text/markdown;charset=utf-8'});
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = `${name}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      window.alert((e as Error).message);
+    }
+  };
+
+  const goScreen = (screen: Parameters<NavigationProps['onNavigate']>[0], t: Parameters<NavigationProps['onNavigate']>[1]) => {
+    void flushBeforeNav().then(() => onNavigate(screen, t));
+  };
+
+  const applyChapterTitle = async (chapterId: string, raw: string) => {
+    if (!activeProject) return;
+    const t = raw.trim();
+    if (!t) {
+      setRenaming(null);
+      return;
+    }
+    const prev = outline?.chapters.find((c) => c.id === chapterId)?.title;
+    if (t === prev) {
+      setRenaming(null);
+      return;
+    }
+    try {
+      await api.patchChapterTitle(activeProject.id, chapterId, t);
+      await refreshOutline();
+    } catch (e) {
+      window.alert((e as Error).message);
+    } finally {
+      setRenaming(null);
+    }
+  };
+
+  const applySceneTitle = async (sceneId: string, raw: string) => {
+    if (!activeProject) return;
+    const t = raw.trim();
+    if (!t) {
+      setRenaming(null);
+      return;
+    }
+    const prev = outline?.scenes.find((s) => s.id === sceneId)?.title;
+    if (t === prev) {
+      setRenaming(null);
+      return;
+    }
+    try {
+      await api.patchSceneTitle(activeProject.id, sceneId, t);
+      await refreshOutline();
+    } catch (e) {
+      window.alert((e as Error).message);
+    } finally {
+      setRenaming(null);
+    }
+  };
+
   const toolGroups = [
     {
       label: 'Plan',
       items: [
         {
-          label: 'Reference notes',
-          detail: 'Characters, locations, notes',
+          label: 'The Codex',
+          detail: 'Build zone: canvas and timeline',
           icon: <MapIcon className="h-4 w-4" />,
-          onClick: () => onNavigate('StoryWikiHub', 'push_back'),
+          onClick: () => goScreen('StoryWikiHub', 'push_back'),
+        },
+        {
+          label: 'Story Bible',
+          detail: 'Encyclopedia, lore, tracked motifs',
+          icon: <BookOpen className="h-4 w-4" />,
+          onClick: () => goScreen('StoryBible', 'push'),
         },
         {
           label: 'Canvas',
           detail: 'Loose notes and structure',
           icon: <Layers className="h-4 w-4" />,
-          onClick: () => onNavigate('StoryCanvas', 'push'),
+          onClick: () => goScreen('StoryCanvas', 'push'),
         },
         {
           label: 'Timeline',
           detail: 'Events and reveal order',
           icon: <Calendar className="h-4 w-4" />,
-          onClick: () => onNavigate('TimelineView', 'push'),
-        },
-        {
-          label: 'Motifs',
-          detail: 'Recurring images and themes',
-          icon: <Layers className="h-4 w-4" />,
-          onClick: () => onNavigate('MotifThemePanel', 'push'),
+          onClick: () => goScreen('TimelineView', 'push'),
         },
       ],
     },
@@ -318,13 +559,42 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           label: 'Continuity',
           detail: 'Unresolved story flags',
           icon: <BookOpen className="h-4 w-4" />,
-          onClick: () => onNavigate('ContinuityCheckPanel', 'push'),
+          onClick: () => goScreen('ContinuityCheckPanel', 'push'),
         },
         {
           label: 'Agent pass',
           detail: 'Longer AI review jobs',
           icon: <Brain className="h-4 w-4" />,
-          onClick: () => onNavigate('AgentMode', 'push'),
+          onClick: () => goScreen('AgentMode', 'push'),
+        },
+      ],
+    },
+    {
+      label: 'Craft',
+      items: [
+        {
+          label: 'Lore compress',
+          detail: 'Select prose — embed worldbuilding in scene (storycraft)',
+          icon: <ScrollText className="h-4 w-4" />,
+          onClick: () => void runStorycraft('story_lore'),
+        },
+        {
+          label: 'Addiction beat',
+          detail: 'Make the next page feel inevitable (storycraft)',
+          icon: <Zap className="h-4 w-4" />,
+          onClick: () => void runStorycraft('story_addiction'),
+        },
+        {
+          label: 'Char match',
+          detail: 'Line voice up with character (storycraft)',
+          icon: <UserCheck className="h-4 w-4" />,
+          onClick: () => void runStorycraft('story_cont_check'),
+        },
+        {
+          label: 'Story plan',
+          detail: 'Tighten act or chapter spine in selection (storycraft)',
+          icon: <Waypoints className="h-4 w-4" />,
+          onClick: () => void runStorycraft('story_planner'),
         },
       ],
     },
@@ -335,7 +605,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           label: 'Versions',
           detail: 'Snapshots and history',
           icon: <Package className="h-4 w-4" />,
-          onClick: () => onNavigate('VersionHistory', 'push'),
+          onClick: () => goScreen('VersionHistory', 'push'),
         },
       ],
     },
@@ -345,13 +615,36 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     <AppScaffold
       active="manuscript"
       onNavigate={onNavigate}
+      beforeNavigate={flushBeforeNav}
+      minimalChrome={zenFocus}
       mainClassName="overflow-hidden"
       actions={
         <>
-          <div className="flex items-center gap-2 bg-sepia-mid px-2 py-0.5 rounded-sm">
-            <span className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Zen Mode</span>
-            <div className="w-2 h-2 rounded-full bg-amber-wax" />
+          <div className="hidden max-w-[10rem] flex-col text-right font-sans text-[10px] leading-tight text-ink-muted sm:flex" title="Latest successful save to disk">
+            <span className="uppercase tracking-widest">Last saved</span>
+            <span className="font-sans text-xs text-ink">{formatLastSaved(lastSavedAt)}</span>
           </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-mid px-2.5 py-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
+            onClick={() => void exportSceneMarkdown()}
+            title="Download this scene as a Markdown file"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+          <button
+            type="button"
+            className={`flex items-center gap-1.5 rounded-sm px-2.5 py-1 font-sans text-[10px] uppercase tracking-widest ${
+              zenFocus ? 'bg-primary text-parchment' : 'border border-oak-variant bg-sepia-mid text-ink-muted hover:text-ink'
+            }`}
+            onClick={() => setZenFocus((z) => !z)}
+            title="Hide chrome and show only the page (Esc to exit)"
+            aria-pressed={zenFocus}
+          >
+            Studio zen
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-wax" aria-hidden />
+          </button>
           <span className="hidden text-ink-muted text-xs sm:inline">{wordCount.toLocaleString()} words</span>
           <button
             type="button"
@@ -361,33 +654,72 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           >
             Tools
           </button>
-          <button type="button" className="p-2 hover:bg-sepia-high rounded-sm" onClick={() => onNavigate('VersionHistory', 'push')} title="Version history">
+          <button
+            type="button"
+            className="p-2 hover:bg-sepia-high rounded-sm"
+            onClick={() => goScreen('VersionHistory', 'push')}
+            title="Version history"
+          >
             <History className="w-4 h-4 text-ink-muted hover:text-ink" />
           </button>
-          <button type="button" className="p-2 hover:bg-sepia-high rounded-sm" onClick={() => onNavigate('SettingsScreen', 'push')} title="Settings">
+          <button type="button" className="p-2 hover:bg-sepia-high rounded-sm" onClick={() => goScreen('SettingsScreen', 'push')} title="Settings">
             <Settings className="w-4 h-4 text-ink-muted hover:text-ink" />
           </button>
         </>
       }
       footer={
         <footer className="relative z-50 flex h-8 items-center justify-between border-t border-oak-variant bg-sepia-high px-6 font-sans text-[10px] uppercase tracking-widest text-ink-muted">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <div className={`h-1.5 w-1.5 rounded-full ${savedPulse ? 'bg-amber-wax' : 'bg-green-600'}`} />
               <span>{savedPulse ? 'Saving...' : 'Saved'}</span>
             </div>
             <span className="text-oak">|</span>
-            <span>Scene packet mode</span>
+            <span className="flex items-center gap-1.5 min-w-0" title="Scene and story context are sent with each AI call">
+              <Brain className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate">Scene packet mode</span>
+            </span>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 shrink-0">
             <span className="font-bold text-primary">Words: {wordCount.toLocaleString()}</span>
-            <div className="rounded-sm bg-primary px-3 py-1 text-[9px] font-bold text-parchment">ZEN ACTIVE</div>
+            {zenFocus ? <div className="rounded-sm bg-primary px-3 py-1 text-[9px] font-bold text-parchment">STUDIO ZEN</div> : null}
           </div>
         </footer>
       }
     >
+      {zenFocus ? (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] flex items-start justify-end gap-2 p-3">
+          <div className="pointer-events-auto flex max-w-sm flex-wrap items-center justify-end gap-2 rounded-sm border border-oak-variant/80 bg-sepia-high/95 px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink shadow-md backdrop-blur-sm">
+            <span className="text-ink-muted">Last: {formatLastSaved(lastSavedAt)}</span>
+            <button
+              type="button"
+              onClick={() => void exportSceneMarkdown()}
+              className="inline-flex items-center gap-1 border border-oak-variant px-2 py-0.5 text-ink hover:bg-sepia-mid"
+            >
+              <Download className="h-3 w-3" />
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={() => setZenFocus(false)}
+              className="bg-primary px-2 py-0.5 text-parchment hover:opacity-90"
+            >
+              Exit zen
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {zenFocus ? (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 font-sans text-[10px] uppercase tracking-widest text-ink-muted/90" aria-hidden>
+          {wordCount.toLocaleString()} words
+        </div>
+      ) : null}
       <div className="flex h-full min-h-0 overflow-hidden">
-        <aside className="bg-sepia-low text-ink font-serif text-sm w-64 border-r border-oak-variant flex flex-col py-4 px-2 hidden lg:flex">
+        <aside
+          className={`bg-sepia-low text-ink font-serif text-sm w-64 border-r border-oak-variant flex flex-col py-4 px-2 ${
+            zenFocus ? 'hidden' : 'hidden lg:flex'
+          }`}
+        >
           <div className="px-4 mb-6">
             <h3 className="font-bold text-lg">Manuscript</h3>
             <p className="text-ink-muted text-xs italic truncate" title={activeProject.name}>
@@ -430,12 +762,61 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               .sort((a, b) => a.sort_order - b.sort_order)
               .map((ch) => (
                 <div key={ch.id}>
-                  <div className="px-3 py-2 text-ink font-bold bg-sepia-high rounded-sm flex items-center gap-3">
+                  <div className="group/chapter px-3 py-2 text-ink font-bold bg-sepia-high rounded-sm flex items-center gap-2 min-h-[40px]">
                     <Edit3 className="w-4 h-4 shrink-0" />
-                    <span className="truncate flex-1">{ch.title}</span>
+                    {renaming?.kind === 'chapter' && renaming.id === ch.id ? (
+                      <input
+                        className="min-w-0 flex-1 rounded-sm border border-primary bg-parchment-bright px-1.5 py-0.5 font-sans text-xs text-ink outline-none"
+                        value={renaming.value}
+                        onChange={(e) =>
+                          setRenaming((r) => (r && r.id === ch.id && r.kind === 'chapter' ? { ...r, value: e.target.value } : r))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            skipNextRenameBlur.current = true;
+                            setRenaming(null);
+                            return;
+                          }
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            skipNextRenameBlur.current = true;
+                            void applyChapterTitle(ch.id, (e.currentTarget as HTMLInputElement).value);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (skipNextRenameBlur.current) {
+                            skipNextRenameBlur.current = false;
+                            return;
+                          }
+                          void applyChapterTitle(ch.id, e.currentTarget.value);
+                        }}
+                        autoFocus
+                        aria-label="Chapter title"
+                      />
+                    ) : (
+                      <span
+                        className="truncate flex-1 cursor-default"
+                        onDoubleClick={() => setRenaming({ kind: 'chapter', id: ch.id, value: ch.title })}
+                        title="double-click to rename"
+                      >
+                        {ch.title}
+                      </span>
+                    )}
+                    {renaming?.kind === 'chapter' && renaming.id === ch.id ? null : (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-sm p-1 text-ink-muted opacity-0 transition-opacity group-hover/chapter:opacity-100 hover:bg-sepia-mid hover:text-primary"
+                        title="Rename chapter"
+                        onClick={() => setRenaming({ kind: 'chapter', id: ch.id, value: ch.title })}
+                        aria-label="Rename chapter"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="p-1 rounded-sm text-ink-muted hover:text-red-200 hover:bg-sepia-mid disabled:opacity-30"
+                      className="p-1 rounded-sm text-ink-muted hover:text-red-200 hover:bg-sepia-mid disabled:opacity-30 shrink-0"
                       title="Delete chapter"
                       disabled={(outline?.chapters.length ?? 0) <= 1}
                       onClick={() => void handleDeleteChapter(ch.id, ch.title)}
@@ -450,16 +831,73 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
                       .map((sc) => (
                         <div
                           key={sc.id}
-                          className={`flex items-center gap-1 rounded-sm ${
+                          className={`group flex max-w-full items-center gap-0.5 rounded-sm ${
                             sc.id === activeSceneId ? 'text-primary font-bold border-l-2 border-primary -ml-3 pl-6' : 'text-ink-muted hover:text-primary'
                           }`}
                         >
-                          <button type="button" onClick={() => setActiveScene(sc.id)} className="min-w-0 flex-1 text-left px-3 py-1.5 text-xs bg-transparent border-none">
-                            <span className="block truncate">{sc.title}</span>
-                          </button>
+                          {renaming?.kind === 'scene' && renaming.id === sc.id ? (
+                            <input
+                              className="min-w-0 max-w-full flex-1 rounded-sm border border-primary bg-parchment-bright px-1.5 py-1.5 text-xs text-ink outline-none"
+                              value={renaming.value}
+                              onChange={(e) =>
+                                setRenaming((r) => (r && r.id === sc.id && r.kind === 'scene' ? { ...r, value: e.target.value } : r))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  skipNextRenameBlur.current = true;
+                                  setRenaming(null);
+                                  return;
+                                }
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  skipNextRenameBlur.current = true;
+                                  void applySceneTitle(sc.id, (e.currentTarget as HTMLInputElement).value);
+                                }
+                              }}
+                              onBlur={(e) => {
+                                if (skipNextRenameBlur.current) {
+                                  skipNextRenameBlur.current = false;
+                                  return;
+                                }
+                                void applySceneTitle(sc.id, e.currentTarget.value);
+                              }}
+                              autoFocus
+                              aria-label="Scene title"
+                            />
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setActiveScene(sc.id)}
+                                onDoubleClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setRenaming({ kind: 'scene', id: sc.id, value: sc.title });
+                                }}
+                                className="min-w-0 flex-1 overflow-hidden text-ellipsis text-left px-1.5 py-1.5 text-xs"
+                                title="Click to open · double-click to rename"
+                              >
+                                {sc.title}
+                              </button>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-sm p-1 text-ink-muted opacity-0 transition-opacity hover:bg-sepia-mid hover:text-primary group-hover:opacity-100"
+                                title="Rename scene"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRenaming({ kind: 'scene', id: sc.id, value: sc.title });
+                                }}
+                                aria-label="Rename scene"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
-                            className="p-1 mr-1 rounded-sm text-ink-muted hover:text-red-200 hover:bg-sepia-mid disabled:opacity-30"
+                            className="p-1 rounded-sm text-ink-muted hover:text-red-200 hover:bg-sepia-mid disabled:opacity-30 shrink-0"
                             title="Delete scene"
                             disabled={(outline?.scenes.length ?? 0) <= 1}
                             onClick={() => void handleDeleteScene(sc.id, sc.title)}
@@ -474,15 +912,26 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           </div>
         </aside>
 
-        <main className="zen-editor-main flex min-w-0 flex-1 justify-center overflow-y-auto relative">
-          <div className="manuscript-page w-full bg-parchment-bright shadow-xl relative paper-stack">
+        <main
+          ref={mainScrollRef}
+          className="zen-editor-main flex min-w-0 flex-1 items-start justify-center overflow-y-auto relative"
+        >
+          <div className="manuscript-page w-full shrink-0 bg-parchment-bright shadow-xl relative paper-stack">
             <header className="mb-8 text-center">
               <p className="font-sans text-xs text-ink-muted uppercase tracking-widest mb-2 font-bold">
                 {activeChapter?.title ?? 'Chapter'}
               </p>
-              <h1 className="text-3xl font-semibold italic text-primary mb-3">
-                {outline?.scenes.find((s) => s.id === activeSceneId)?.title ?? 'Scene'}
-              </h1>
+              <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
+                <h1 className="text-3xl font-semibold italic text-primary m-0">
+                  {outline?.scenes.find((s) => s.id === activeSceneId)?.title ?? 'Scene'}
+                </h1>
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-oak-variant/50 bg-sepia-high/50 text-ink-muted"
+                  title="AI uses your scene and story context packet for each request (scene packet mode)"
+                >
+                  <Brain className="h-3.5 w-3.5" aria-hidden />
+                </span>
+              </div>
               <div className="w-16 h-px bg-oak-variant mx-auto mb-6" />
             </header>
 
@@ -557,7 +1006,11 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               ref={editorRef}
               projectId={activeProject.id}
               sceneId={activeSceneId}
+              typewriterScrollParentRef={mainScrollRef}
+              memoryTerms={memoryTerms}
+              onEntityClick={(label) => setEntityCard(label)}
               onSaved={() => {
+                setLastSavedAt(new Date());
                 setSavedPulse(true);
                 setTimeout(() => setSavedPulse(false), 900);
               }}
@@ -576,20 +1029,24 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
             </div>
           </div>
 
-          <button
-            type="button"
-            className="snapshot-button fixed bg-amber-wax text-parchment rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all z-40 border-4 border-white"
-            title="Snapshot"
-            onClick={() => void api.createSnapshot(activeProject.id, 'manual')}
-          >
-            <Save className="w-6 h-6" />
-          </button>
+          {zenFocus ? null : (
+            <button
+              type="button"
+              className="snapshot-button fixed bg-amber-wax text-parchment rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all z-40 border-4 border-white"
+              title="Snapshot"
+              onClick={() => void api.createSnapshot(activeProject.id, 'manual')}
+            >
+              <Save className="w-6 h-6" />
+            </button>
+          )}
         </main>
 
         <aside
-          className={`hidden border-l border-oak-variant bg-sepia-low py-4 z-50 transition-[width] duration-200 lg:flex lg:flex-col ${
-            toolsOpen ? 'w-64 px-3' : 'w-12 items-center px-1'
-          }`}
+          className={`${
+            zenFocus
+              ? 'hidden'
+              : 'hidden border-l border-oak-variant bg-sepia-low py-4 z-50 transition-[width] duration-200 lg:flex lg:flex-col'
+          } ${toolsOpen ? 'w-64 px-3' : 'w-12 items-center px-1'}`}
         >
           <button
             type="button"
@@ -648,6 +1105,36 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           )}
         </aside>
       </div>
+
+      {entityCard ? (
+        <div
+          className="fixed bottom-24 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 rounded-sm border border-oak-variant bg-surface-container-highest px-4 py-3 font-sans text-ink shadow-lg"
+          role="dialog"
+          aria-label="Story memory"
+        >
+          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-muted">Story memory</p>
+          <p className="mt-2 font-serif text-lg text-primary">{entityCard}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-sm bg-primary px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-parchment"
+              onClick={() => {
+                setEntityCard(null);
+                goScreen('StoryBible', 'push');
+              }}
+            >
+              Open Story Bible
+            </button>
+            <button
+              type="button"
+              className="rounded-sm border border-oak-variant px-3 py-1.5 text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
+              onClick={() => setEntityCard(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {suggestionAlternative ? (
         <SuggestionPanel

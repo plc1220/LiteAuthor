@@ -104,7 +104,7 @@ export default function VersionHistory({onNavigate}: NavigationProps) {
         <div>
           <p className="font-serif text-lg italic mb-4">Select a project before opening version history.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Project Desk
+            The Codex
           </button>
         </div>
       </div>

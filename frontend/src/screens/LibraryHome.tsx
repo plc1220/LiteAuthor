@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Archive,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Settings,
+  Activity,
   Sparkles,
   Trash2,
 } from 'lucide-react';
@@ -112,6 +113,76 @@ function projectMatchesFilter(project: Project, filter: FilterKey) {
   return true;
 }
 
+function getEmotionalArcValues(project: Project): number[] | null {
+  const raw = project.settings?.emotional_arc;
+  if (Array.isArray(raw) && raw.length > 0 && raw.every((n) => typeof n === 'number' && Number.isFinite(n))) {
+    return raw as number[];
+  }
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw) as unknown;
+      if (Array.isArray(p) && p.length > 0 && p.every((n) => typeof n === 'number' && Number.isFinite(n))) {
+        return p;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function getFocalCharacter(project: Project) {
+  return (
+    getSettingString(project, 'focal_character')?.trim() ||
+    getSettingString(project, 'main_character')?.trim() ||
+    getSettingString(project, 'protagonist')?.trim() ||
+    getSettingString(project, 'focal_pov')?.trim() ||
+    null
+  );
+}
+
+function getStoryHealthLabel(project: Project, progressPercent: number | null) {
+  const explicit = getSettingString(project, 'story_health')?.trim();
+  if (explicit) return explicit;
+  if (progressPercent !== null && progressPercent >= 0) {
+    if (progressPercent >= 100) return 'At target length';
+    if (progressPercent >= 66) return 'Strong progress';
+    if (progressPercent >= 33) return 'Finding rhythm';
+  }
+  return 'Early draft';
+}
+
+function EmotionalArcSparkline({values}: {values: number[] | null}) {
+  const w = 76;
+  const h = 22;
+  const pad = 2;
+  const hasData = values != null && values.length > 0;
+  const raw = hasData && values ? values : Array.from({length: 8}, () => 0.5);
+  const min = Math.min(...raw);
+  const max = Math.max(...raw);
+  const range = max - min || 1;
+  const norm = raw.map((v) => (v - min) / range);
+  const pathD = norm
+    .map((v, i) => {
+      const x = pad + (i / (norm.length - 1)) * (w - 2 * pad);
+      const y = pad + (1 - v) * (h - 2 * pad);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg
+      className={hasData ? 'shrink-0 text-primary/90' : 'shrink-0 text-ink-muted/45'}
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      aria-hidden
+    >
+      <path d={pathD} fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 function HighlightedTitle({title, query}: {title: string; query: string}) {
   const trimmed = query.trim();
   if (!trimmed) return <>{title}</>;
@@ -145,6 +216,12 @@ function ProjectCard({
   const progress = targetWords ? Math.min(100, Math.round((currentWords / targetWords) * 100)) : null;
   const chapterCount = getSettingNumber(project, 'chapter_count') ?? getSettingNumber(project, 'chapters');
   const status = projectStatus(project);
+  const emotionalValues = getEmotionalArcValues(project);
+  const focal = getFocalCharacter(project);
+  const health = getStoryHealthLabel(project, progress);
+  const arcTitle = emotionalValues?.length
+    ? 'Emotional arc snapshot'
+    : 'Map emotional arc in the Codex or story metadata';
 
   return (
     <article className="group relative overflow-hidden rounded-soft border border-oak-variant bg-sepia-low transition-all hover:-translate-y-1 hover:border-primary/45 hover:bg-sepia-mid">
@@ -165,16 +242,45 @@ function ProjectCard({
           <h3 className="min-h-[42px] text-[15px] font-serif font-medium leading-snug text-ink line-clamp-2" title={project.name}>
             <HighlightedTitle title={project.name} query={query} />
           </h3>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted">
-            <span>{currentWords.toLocaleString()} words</span>
-            <span className="text-oak-variant">/</span>
-            <span>{relativeTime(projectDate(project))}</span>
+          <div className="mt-3 rounded-sm border border-oak-variant/80 bg-sepia-high/60 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2 text-[9px] font-sans font-semibold uppercase tracking-widest text-ink-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <Activity className="h-3.5 w-3.5 text-primary/80" />
+                Story pulse
+              </span>
+              {chapterCount != null && chapterCount > 0 ? (
+                <span className="text-ink-muted/80 normal-case">
+                  {chapterCount} {chapterCount === 1 ? 'chapter' : 'chapters'}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-0.5 text-sm font-sans text-ink" title={health}>
+              {health}
+            </p>
+            <div className="mt-2.5 flex items-end justify-between gap-3">
+              {focal ? (
+                <span
+                  className="inline-block max-w-[60%] truncate rounded-full border border-primary/25 bg-primary/8 px-2.5 py-0.5 text-[11px] font-sans text-primary"
+                  title={focal}
+                >
+                  Focal: {focal}
+                </span>
+              ) : (
+                <span className="text-[11px] font-sans leading-snug text-ink-muted">Focal character not set</span>
+              )}
+              <span className="shrink-0" title={arcTitle}>
+                <EmotionalArcSparkline values={emotionalValues} />
+              </span>
+            </div>
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <span className="rounded-sm border border-oak-variant bg-sepia-high px-2 py-1 text-[10px] font-sans uppercase tracking-widest text-primary">
               {status}
             </span>
-            <span className="truncate text-[10px] font-mono text-ink-muted" title={project.root_path}>
+            <span
+              className="hidden max-w-[min(12rem,42vw)] truncate text-right text-[10px] font-mono text-ink-muted/90 group-hover:block"
+              title={project.root_path}
+            >
               {project.root_path}
             </span>
           </div>
@@ -231,22 +337,6 @@ function ProjectCard({
   );
 }
 
-function CreateProjectCard({onCreate}: {onCreate: () => void}) {
-  return (
-    <button
-      type="button"
-      className="flex min-h-[292px] flex-col items-center justify-center rounded-soft border border-dashed border-primary/45 bg-sepia-low/45 p-8 text-center transition-all hover:-translate-y-1 hover:border-primary hover:bg-sepia-mid"
-      onClick={onCreate}
-    >
-      <span className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-primary/35 bg-primary/10 text-primary">
-        <Plus className="h-7 w-7" />
-      </span>
-      <span className="font-serif text-xl italic text-ink">Create new</span>
-      <span className="mt-2 text-xs text-ink-muted">Open the project setup wizard</span>
-    </button>
-  );
-}
-
 export default function LibraryHome({onNavigate}: NavigationProps) {
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.loadProjects);
@@ -255,12 +345,34 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
 
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [activityCollapsed, setActivityCollapsed] = useState(() => localStorage.getItem('liteauthor.library.activityCollapsed') === 'true');
 
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (searchOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [searchOpen]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      if (e.key === 'Escape' && searchOpen) {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [searchOpen]);
 
   useEffect(() => {
     localStorage.setItem('liteauthor.library.activityCollapsed', String(activityCollapsed));
@@ -300,7 +412,6 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
     });
   }, [filter, query, sortedProjects]);
 
-  const latestProject = sortedProjects[0] ?? null;
   const recentActivities = sortedProjects.slice(0, 8).map((project, index) => ({
     id: `${project.id}-${index}`,
     project,
@@ -318,24 +429,46 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
 
   return (
     <div className="flex min-h-screen flex-col bg-parchment text-ink">
-      <header className="flex h-10 items-center justify-between border-b border-oak-variant bg-sepia-highest/70 px-5">
-        <div className="flex items-center gap-3">
+      <header className="flex h-10 min-h-10 items-center justify-between gap-2 border-b border-oak-variant bg-sepia-highest/70 px-4 sm:px-5">
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
           <span className="flex h-6 w-6 items-center justify-center rounded-sm border border-primary/35 bg-primary/10 font-serif text-sm font-bold text-primary">
             L
           </span>
-          <span className="font-sans text-sm font-semibold tracking-wide text-ink">LiteAuthor</span>
+          <span className="hidden min-w-0 font-sans text-sm font-semibold tracking-wide text-ink sm:inline">LiteAuthor</span>
         </div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="flex h-8 w-8 items-center justify-center rounded-sm hover:bg-sepia-high" title="Command palette unavailable on Library Home">
-            <Search className="h-4 w-4 text-oak" />
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-2">
+          {searchOpen ? (
+            <label className="relative w-full min-w-0 max-w-sm flex-1 sm:max-w-md">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oak" />
+              <input
+                ref={searchInputRef}
+                className="w-full rounded-sm border border-oak-variant bg-sepia-low py-1.5 pl-8 pr-2 text-sm outline-none placeholder:text-ink-muted/70 focus:border-primary/60"
+                placeholder="Search projects…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                aria-label="Search projects"
+              />
+            </label>
+          ) : null}
+          <button
+            type="button"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-oak transition hover:bg-sepia-high hover:text-ink"
+            title="Search (⌘K)"
+            aria-expanded={searchOpen}
+            aria-label={searchOpen ? 'Close search' : 'Open search'}
+            onClick={() => {
+              setSearchOpen((o) => !o);
+            }}
+          >
+            <Search className="h-4 w-4" />
           </button>
           <button
             type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-sm hover:bg-sepia-high"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-oak transition hover:bg-sepia-high hover:text-ink"
             title="Settings"
             onClick={() => onNavigate('SettingsScreen', 'push')}
           >
-            <Settings className="h-4 w-4 text-oak" />
+            <Settings className="h-4 w-4" />
           </button>
         </div>
       </header>
@@ -348,48 +481,35 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
 
       <main className="flex-1 overflow-y-auto pb-24">
         <section className="border-b border-oak-variant bg-sepia-low">
-          <div className="mx-auto flex min-h-[220px] max-w-[1680px] flex-col justify-center px-6 py-9 md:px-12 xl:px-16">
-            <div className="flex flex-col gap-7 md:flex-row md:items-end md:justify-between">
+          <div className="mx-auto flex min-h-[160px] max-w-[1680px] flex-col justify-center px-6 py-7 md:min-h-[180px] md:px-12 md:py-8 xl:px-16">
+            <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
               <div>
-                <div className="mb-4 flex items-center gap-2 text-[10px] font-sans uppercase tracking-widest text-primary">
-                  <Sparkles className="h-4 w-4" />
+                <div className="mb-3 flex items-center gap-2 text-[10px] font-sans font-medium uppercase tracking-widest text-primary/90">
+                  <Sparkles className="h-3.5 w-3.5" />
                   Local manuscripts
                 </div>
-                <h1 className="font-serif text-5xl font-medium italic leading-tight text-ink md:text-6xl">Your manuscripts</h1>
-                <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-muted">
-                  {projects.length === 0
-                    ? 'No projects yet. Start a first manuscript when you are ready.'
-                    : `${projects.length} project${projects.length === 1 ? '' : 's'} in this library${
-                        latestProject ? `, last opened ${relativeTime(projectDate(latestProject))}` : ''
-                      }.`}
-                </p>
+                <h1 className="font-serif text-2xl font-normal not-italic leading-tight text-ink/90 md:text-3xl">Your manuscripts</h1>
+                {projects.length === 0 ? (
+                  <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-muted">No projects yet. Start a first manuscript when you are ready.</p>
+                ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 md:shrink-0">
                 <button
                   type="button"
-                  className="flex items-center gap-2 rounded-sm bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-parchment-bright shadow-sm transition hover:brightness-110"
+                  className="flex items-center gap-2 rounded-sm bg-primary px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-parchment-bright shadow-sm transition hover:brightness-110"
                   onClick={createProject}
                 >
                   <FilePlus2 className="h-4 w-4" />
                   New Project
-                </button>
-                <button
-                  type="button"
-                  className="flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-high px-4 py-3 text-xs font-bold uppercase tracking-widest text-ink-muted"
-                  disabled
-                  title="Command palette will be wired by the shell."
-                >
-                  <Search className="h-4 w-4" />
-                  Cmd K
                 </button>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="mx-auto max-w-[1680px] px-6 py-7 md:px-12 xl:px-16">
-          <div className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap gap-2">
+        <section className="mx-auto max-w-[1680px] px-6 py-6 md:px-12 md:py-7 xl:px-16">
+          {projects.length > 0 ? (
+            <div className="mb-6 flex flex-wrap gap-2">
               {FILTERS.map((item) => (
                 <button
                   key={item.key}
@@ -401,21 +521,11 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
                   }`}
                   onClick={() => setFilter(item.key)}
                 >
-                  {item.label} <span className="ml-2 opacity-70">{counts[item.key]}</span>
+                  {item.label} <span className="tabular-nums opacity-90">({counts[item.key]})</span>
                 </button>
               ))}
             </div>
-
-            <label className="relative block w-full lg:w-[420px] xl:w-[448px]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oak" />
-              <input
-                className="w-full rounded-sm border border-oak-variant bg-sepia-low py-3 pl-10 pr-3 text-sm outline-none placeholder:text-ink-muted/70 focus:border-primary/60"
-                placeholder="Search projects..."
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </label>
-          </div>
+          ) : null}
 
           {projects.length === 0 ? (
             <div className="flex min-h-[380px] flex-col items-center justify-center rounded-soft border border-oak-variant bg-sepia-low px-6 text-center">
@@ -451,7 +561,6 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
                   onOpen={() => void openProject(project)}
                 />
               ))}
-              <CreateProjectCard onCreate={createProject} />
             </div>
           )}
         </section>

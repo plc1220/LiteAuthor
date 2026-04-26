@@ -69,6 +69,9 @@ _INTENT_TASK = {
     "pacing_analyzer": "Adjust pacing: sentence variety, scene turns, and compression; preserve voice and story facts.",
     "character_engine": "Strengthen character drive: want, cost, and reaction-consistent action in the selection.",
     "payoff_tracker": "Clarify or sharpen setup, promise, and payoff in this beat; do not change canon unless explicitly improving echo.",
+    "lore_compression": "Compress in-world information: show through action and voice; avoid encyclopedic delivery unless kept diegetic.",
+    "chapter_addiction": "Strengthen the chapter as a serial unit: forward pull, curiosity, and stakes; preserve continuity.",
+    "planning_architect": "Tighten plan-level story architecture: act intent, key turns, and spine; keep prose in-voice, avoid inventing new canon without clear purpose.",
 }
 
 

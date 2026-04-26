@@ -359,6 +359,15 @@
     white-space: pre-wrap;
   }
 
+  .story-memory-entity {
+    cursor: help;
+    text-decoration: underline;
+    text-decoration-color: var(--color-outline, #80756f);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    text-decoration-skip-ink: auto;
+  }
+
   .zen-editor-shell {
     height: 100dvh;
     min-height: 100dvh;
@@ -372,9 +381,10 @@
   .manuscript-page {
     max-width: min(760px, 100%);
     min-height: max(680px, calc(100dvh - 144px));
-    padding:
-      clamp(40px, 6vh, 64px)
-      clamp(20px, 5vw, 44px);
+    box-sizing: border-box;
+    padding: clamp(40px, 6vh, 64px) clamp(20px, 5vw, 44px);
+    /* extra room below the last line when scrolling */
+    padding-bottom: clamp(64px, 12vh, 160px);
   }
 
   .snapshot-button {

@@ -1,58 +1,69 @@
-import {useEffect, useMemo, useState} from 'react';
-import {Edit3, Users, Clock, BookOpen, Plus, History, Settings, Info, TriangleAlert} from 'lucide-react';
+import {useEffect, useState, useCallback} from 'react';
+import {Edit3, Users, Clock, BookOpen, History, Settings} from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
-import {api} from '../lib/api';
+import {api, type Chapter, type Scene} from '../lib/api';
+import {TimelineThreadCanvas, type ThreadEvent} from '../components/TimelineThreadCanvas';
+import {continuityTension} from '../lib/timelineLayout';
 
-type EventRow = {
-  id: string;
-  title: string;
-  story_time: string | null;
-  narrative_order: number | null;
-  pov: string | null;
-  participants: string[];
-  dependencies: string[];
-  notes: string | null;
-  has_conflict: boolean;
-  scene_id: string | null;
-};
+/** Single shared reference so we don't pass a fresh `[]` every render and thrash `TimelineThreadCanvas` layout effects. */
+const EMPTY_CHAPTERS: Chapter[] = [];
+const EMPTY_SCENES: Scene[] = [];
+
+type EventRow = ThreadEvent;
 
 export default function TimelineView({onNavigate}: NavigationProps) {
   const activeProject = useProjectStore((s) => s.activeProject);
   const selectProject = useProjectStore((s) => s.selectProject);
   const projects = useProjectStore((s) => s.projects);
+  const outline = useProjectStore((s) => s.outline);
+  const refreshOutline = useProjectStore((s) => s.refreshOutline);
+
   const [events, setEvents] = useState<EventRow[]>([]);
   const [selected, setSelected] = useState<EventRow | null>(null);
   const [flags, setFlags] = useState<Record<string, unknown>[]>([]);
+  const load = useCallback(async () => {
+    if (!activeProject) {
+      return;
+    }
+    const o = await refreshOutline();
+    if (!o) {
+      return;
+    }
+    const [ev, fl] = await Promise.all([api.listEvents(activeProject.id), api.listFlags(activeProject.id)]);
+    setEvents(ev as EventRow[]);
+    setFlags(fl);
+  }, [activeProject, refreshOutline]);
 
   useEffect(() => {
-    if (!activeProject) return;
-    (async () => {
-      const [ev, fl] = await Promise.all([api.listEvents(activeProject.id), api.listFlags(activeProject.id)]);
-      setEvents(ev as EventRow[]);
-      setFlags(fl);
-    })();
-  }, [activeProject]);
+    if (!activeProject) {
+      return;
+    }
+    void load();
+  }, [activeProject, load]);
 
-  const revealCards = useMemo(() => {
-    return [...events]
-      .filter((e) => e.narrative_order != null)
-      .sort((a, b) => (a.narrative_order ?? 0) - (b.narrative_order ?? 0))
-      .map((e) => ({
-        title: e.title,
-        pov: (e.pov ?? '—').toUpperCase(),
-        issue: e.has_conflict,
-        italic: Boolean(e.notes?.toLowerCase().includes('flash')),
-      }));
-  }, [events]);
+  const onDropToChapter = async (args: {eventId: string; chapterId: string; sceneId: string; nextNarrativeOrder: number}) => {
+    if (!activeProject) {
+      return;
+    }
+    const {eventId, sceneId, nextNarrativeOrder} = args;
+    const updated = await api.patchEvent(activeProject.id, eventId, {scene_id: sceneId, narrative_order: nextNarrativeOrder});
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? (updated as EventRow) : e)));
+    if (selected?.id === eventId) {
+      setSelected(updated as EventRow);
+    }
+  };
+
+  const chList = outline?.chapters ?? EMPTY_CHAPTERS;
+  const scList = outline?.scenes ?? EMPTY_SCENES;
 
   if (!activeProject) {
     return (
       <div className="flex h-screen items-center justify-center bg-parchment text-ink px-6 text-center gap-4">
         <div>
-          <p className="font-serif text-lg italic mb-4">Select a project from the Project Desk first.</p>
+          <p className="font-serif text-lg italic mb-4">Select a project from the Codex first.</p>
           <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Project Desk
+            The Codex
           </button>
         </div>
       </div>
@@ -67,30 +78,38 @@ export default function TimelineView({onNavigate}: NavigationProps) {
           <p className="text-[10px] text-ink-muted font-sans uppercase tracking-widest">Timeline</p>
         </div>
         <nav className="flex-1 px-4 space-y-2">
-          <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer" onClick={() => onNavigate('ZenEditor', 'push_back')}>
+          <button
+            type="button"
+            className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer"
+            onClick={() => onNavigate('ZenEditor', 'push_back')}
+          >
             <Edit3 className="w-4 h-4" />
             <span>Manuscript</span>
           </button>
-          <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
+          <button
+            type="button"
+            className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer"
+            onClick={() => onNavigate('StoryWikiHub', 'push_back')}
+          >
             <Users className="w-4 h-4" />
-            <span>Project Desk</span>
+            <span>The Codex</span>
           </button>
           <div className="w-full flex items-center gap-3 px-4 py-3 bg-sepia-highest text-primary font-bold rounded-r-full text-sm">
             <Clock className="w-4 h-4" />
             <span>Timeline</span>
           </div>
-          <button type="button" className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
+          <button
+            type="button"
+            className="w-full flex items-center gap-3 px-4 py-3 text-ink-muted hover:bg-sepia-highest/50 text-sm bg-transparent border-none cursor-pointer"
+            onClick={() => onNavigate('StoryWikiHub', 'push_back')}
+          >
             <BookOpen className="w-4 h-4" />
-            <span>Reference Notes</span>
+            <span>Story Bible</span>
           </button>
         </nav>
         <div className="px-6 py-4 space-y-2">
           <label className="text-[10px] font-sans uppercase text-ink-muted">Active project</label>
-          <select
-            className="w-full bg-sepia-high border border-oak-variant text-xs p-2 rounded-sm"
-            value={activeProject.id}
-            onChange={(e) => void selectProject(e.target.value)}
-          >
+          <select className="w-full bg-sepia-high border border-oak-variant text-xs p-2 rounded-sm" value={activeProject.id} onChange={(e) => void selectProject(e.target.value)}>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -100,85 +119,61 @@ export default function TimelineView({onNavigate}: NavigationProps) {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col">
-        <header className="flex justify-between items-center px-8 py-4 bg-sepia-low border-b border-oak-variant z-10">
-          <div className="flex items-center gap-4">
-            <div className="text-2xl font-bold italic">Manuscript</div>
+      <main className="flex-1 flex flex-col min-w-0">
+        <header className="flex justify-between items-center px-6 py-4 bg-sepia-low border-b border-oak-variant z-10 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <div className="text-2xl font-bold italic">Thread</div>
             <div className="h-4 w-px bg-oak-variant" />
-            <div className="text-ink-muted font-sans text-[10px] uppercase tracking-widest">Project Desk / Timeline</div>
+            <div className="text-ink-muted font-sans text-[10px] uppercase tracking-widest truncate">The Codex / Timeline</div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             <History className="w-5 h-5 text-ink-muted" />
             <Settings className="w-5 h-5 text-ink-muted cursor-pointer hover:text-ink" onClick={() => onNavigate('SettingsScreen', 'push')} />
           </div>
         </header>
 
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 flex flex-col overflow-x-auto overflow-y-hidden bg-parchment-dim relative">
-            <div className="px-8 py-4 border-b border-oak-variant flex items-center justify-between bg-parchment/50">
-              <span className="text-xs font-sans uppercase tracking-widest text-ink-muted">Events loaded: {events.length}</span>
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col overflow-y-auto min-w-0 min-h-0 bg-parchment-dim">
+            <div className="border-b border-oak-variant/40 bg-parchment/40 px-6 sm:px-8 py-3 text-xs text-ink-muted">
+              {events.length} world beat{events.length === 1 ? '' : 's'} — dual-track: story-time above, where it surfaces in the manuscript below.
             </div>
 
-            <div className="flex-1 relative min-w-[1200px]">
-              <section className="h-1/2 relative border-b border-oak-variant/30">
-                <div className="absolute top-4 left-8 text-[10px] font-sans uppercase tracking-[0.3em] text-ink-muted/50">Story Time (Chronology)</div>
-                <div className="flex h-full pt-16 px-8 gap-6 overflow-x-auto">
-                  {events
-                    .filter((e) => e.story_time)
-                    .map((e) => (
-                      <button
-                        key={e.id}
-                        type="button"
-                        onClick={() => setSelected(e)}
-                        className="min-w-[200px] text-left border border-oak-variant bg-parchment-bright p-4 rounded-sm hover:border-primary bg-transparent cursor-pointer"
-                      >
-                        <div className="text-xs font-serif italic font-bold text-primary">{e.title}</div>
-                        <div className="text-[9px] font-sans text-ink-muted mt-2">{e.story_time}</div>
-                        {e.has_conflict ? (
-                          <div className="mt-2 flex items-center gap-1 text-amber-500 text-[10px] font-sans uppercase">
-                            <TriangleAlert className="w-3 h-3" /> conflict
-                          </div>
-                        ) : null}
-                      </button>
-                    ))}
-                </div>
-              </section>
-
-              <section className="h-1/2 relative bg-sepia-low/20">
-                <div className="absolute top-4 left-8 text-[10px] font-sans uppercase tracking-[0.3em] text-ink-muted/50">Narrative Reveal Order</div>
-                <div className="flex h-full items-center px-12 gap-8 overflow-x-auto">
-                  {revealCards.map((card, i) => (
-                    <div key={i} className="flex flex-col gap-2 shrink-0">
-                      <span className="text-[10px] font-sans text-ink-muted opacity-40 uppercase tracking-widest text-center">#{i + 1}</span>
-                      <div className={`w-48 p-4 border border-oak-variant rounded-sm bg-parchment-bright ${card.italic ? 'italic' : ''} ${card.issue ? 'border-amber-500/50' : ''}`}>
-                        <p className="text-sm font-bold">{card.title}</p>
-                        <div className="mt-2 flex justify-between items-center">
-                          <span className="text-[9px] font-sans px-2 py-0.5 rounded font-bold bg-primary/10 text-primary">{card.pov}</span>
-                          {card.issue ? <Info className="w-3 h-3 text-amber-500" /> : <Plus className="w-3 h-3 text-oak-variant rotate-45" />}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+            <div className="p-4 sm:px-8 sm:py-6">
+              {chList.length === 0 ? (
+                <p className="text-sm text-ink-muted">No chapters in outline — add a chapter in the manuscript, then return.</p>
+              ) : (
+                <TimelineThreadCanvas
+                  events={events}
+                  chapters={chList}
+                  scenes={scList}
+                  selectedId={selected?.id ?? null}
+                  onSelect={(e) => setSelected(e)}
+                  onDropToChapter={onDropToChapter}
+                />
+              )}
             </div>
           </div>
 
-          <aside className="w-[320px] bg-sepia-low border-l border-oak-variant overflow-y-auto flex flex-col">
-            <div className="p-6 border-b border-oak-variant">
-              <h2 className="text-xl italic font-serif mb-2">Event Details</h2>
+          <aside className="w-[min(100%,20rem)] sm:w-[20rem] lg:w-[19rem] shrink-0 bg-sepia-low border-l border-oak-variant overflow-y-auto flex flex-col">
+            <div className="p-4 sm:p-6 border-b border-oak-variant">
+              <h2 className="text-lg italic font-serif mb-1">Event details</h2>
               {selected ? (
                 <>
-                  {selected.has_conflict ? (
-                    <div className="inline-flex items-center gap-2 mb-2 px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-sans uppercase font-bold rounded">Conflict</div>
+                  {continuityTension(selected, events).level === 'watch' ? (
+                    <p className="text-xs text-ink-muted mb-1">↪ Told out of world-time order — often a memory, frame, or reordered tell.</p>
                   ) : null}
-                  <h3 className="text-2xl font-semibold leading-tight">{selected.title}</h3>
+                  {selected.has_conflict || continuityTension(selected, events).level === 'tension' ? (
+                    <div className="mb-1 inline-flex items-center gap-2 px-2 py-0.5 bg-amber-100/90 text-amber-900 text-[10px] font-sans uppercase font-bold rounded">
+                      {selected.has_conflict ? 'Flagged in data' : 'Pacing / logic'}
+                    </div>
+                  ) : null}
+                  <h3 className="text-xl font-semibold leading-tight text-primary mt-1">{selected.title}</h3>
                 </>
               ) : (
-                <p className="text-sm text-ink-muted">Select an event card.</p>
+                <p className="text-sm text-ink-muted">Select a beat in the world row.</p>
               )}
             </div>
-            <div className="flex-1 p-6 space-y-6">
+            <div className="flex-1 p-4 sm:p-6 space-y-4">
               {selected ? (
                 <>
                   <div>
@@ -193,11 +188,18 @@ export default function TimelineView({onNavigate}: NavigationProps) {
                     <label className="text-[10px] font-sans uppercase tracking-widest text-ink-muted block mb-1">Notes</label>
                     <p className="text-sm text-ink-muted leading-relaxed">{selected.notes ?? '—'}</p>
                   </div>
+                  {continuityTension(selected, events).hint && (
+                    <div className="rounded-sm border border-amber-500/30 bg-amber-50/30 p-3 text-xs text-ink">
+                      {continuityTension(selected, events).hint}
+                    </div>
+                  )}
                   <button
                     type="button"
                     className="w-full py-2 border border-primary text-primary font-sans text-xs uppercase tracking-widest hover:bg-primary hover:text-parchment-bright font-bold bg-transparent cursor-pointer rounded-sm"
                     onClick={async () => {
-                      if (!selected) return;
+                      if (!selected) {
+                        return;
+                      }
                       await api.createFlag(activeProject.id, {
                         title: `Timeline: ${selected.title}`,
                         detail: selected.notes || 'Flagged from timeline.',
@@ -225,11 +227,19 @@ export default function TimelineView({onNavigate}: NavigationProps) {
                 </div>
               </div>
             </div>
-            <div className="p-6 border-t border-oak-variant">
-              <button type="button" className="w-full py-2 bg-primary text-parchment text-xs font-sans uppercase tracking-widest font-bold rounded-sm border-none cursor-pointer" onClick={() => onNavigate('AgentMode', 'push')}>
+            <div className="p-4 sm:p-6 border-t border-oak-variant">
+              <button
+                type="button"
+                className="w-full py-2 bg-primary text-parchment text-xs font-sans uppercase tracking-widest font-bold rounded-sm border-none cursor-pointer"
+                onClick={() => onNavigate('AgentMode', 'push')}
+              >
                 Open Agent Mode
               </button>
-              <button type="button" className="mt-2 w-full py-2 border border-oak-variant text-primary text-xs font-sans uppercase tracking-widest font-bold rounded-sm cursor-pointer" onClick={() => onNavigate('ContinuityCheckPanel', 'push')}>
+              <button
+                type="button"
+                className="mt-2 w-full py-2 border border-oak-variant text-primary text-xs font-sans uppercase tracking-widest font-bold rounded-sm cursor-pointer"
+                onClick={() => onNavigate('ContinuityCheckPanel', 'push')}
+              >
                 Review continuity
               </button>
             </div>

@@ -3,12 +3,12 @@ import {motion, AnimatePresence} from 'motion/react';
 import {Screen, TransitionType} from './types';
 import LibraryHome from './screens/LibraryHome';
 import StoryWikiHub from './screens/StoryWikiHub';
+import StoryBible from './screens/StoryBible';
 import StoryCanvas from './screens/StoryCanvas';
 import TimelineView from './screens/TimelineView';
 import AgentMode from './screens/AgentMode';
 import ZenEditor from './screens/ZenEditor';
 import ProjectSetupWizard from './screens/ProjectSetupWizard';
-import MotifThemePanel from './screens/MotifThemePanel';
 import ContinuityCheckPanel from './screens/ContinuityCheckPanel';
 import SettingsScreen from './screens/SettingsScreen';
 import VersionHistory from './screens/VersionHistory';
@@ -49,6 +49,8 @@ export default function App() {
         return <LibraryHome {...props} />;
       case 'StoryWikiHub':
         return <StoryWikiHub {...props} />;
+      case 'StoryBible':
+        return <StoryBible {...props} />;
       case 'StoryCanvas':
         return <StoryCanvas {...props} />;
       case 'TimelineView':
@@ -59,8 +61,6 @@ export default function App() {
         return <ZenEditor {...props} />;
       case 'ProjectSetupWizard':
         return <ProjectSetupWizard {...props} />;
-      case 'MotifThemePanel':
-        return <MotifThemePanel {...props} />;
       case 'ContinuityCheckPanel':
         return <ContinuityCheckPanel {...props} />;
       case 'SettingsScreen':

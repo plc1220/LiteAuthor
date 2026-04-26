@@ -1,12 +1,12 @@
 export type Screen =
   | 'LibraryHome'
   | 'StoryWikiHub'
+  | 'StoryBible'
   | 'StoryCanvas'
   | 'TimelineView'
   | 'AgentMode'
   | 'ZenEditor'
   | 'ProjectSetupWizard'
-  | 'MotifThemePanel'
   | 'ContinuityCheckPanel'
   | 'SettingsScreen'
   | 'VersionHistory';

@@ -14,7 +14,7 @@ type SecondaryPageNavProps = {
 export function SecondaryPageNav({eyebrow, title, projectName, active, actions, onNavigate}: SecondaryPageNavProps) {
   const navItems: {label: string; screen: Screen; icon: ReactNode; key: NonNullable<SecondaryPageNavProps['active']>}[] = [
     {label: 'Manuscript', screen: 'ZenEditor', icon: <BookOpen className="w-4 h-4" />, key: 'manuscript'},
-    {label: 'Project Desk', screen: 'StoryWikiHub', icon: <Library className="w-4 h-4" />, key: 'wiki'},
+    {label: 'The Codex', screen: 'StoryWikiHub', icon: <Library className="w-4 h-4" />, key: 'wiki'},
     {label: 'Settings', screen: 'SettingsScreen', icon: <Settings className="w-4 h-4" />, key: 'settings'},
   ];
 

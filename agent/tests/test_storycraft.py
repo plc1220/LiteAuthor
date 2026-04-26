@@ -62,6 +62,20 @@ class StorycraftTest(unittest.TestCase):
             self.assertTrue(sel.rules, msg=f"expected at least one rule for {intent}")
             self.assertIn("Priority:", " ".join(sel.diagnosis), msg=repr(sel.diagnosis))
 
+    def test_phase3_intents_stable(self):
+        """Phase 3 product modules map to selector intents without errors."""
+        rules = load_rules(_BUILT_IN)[:120]
+        sample = "The contract sat unread on the table. 'We need to talk,' she said."
+        for intent in (
+            "lore_compression",
+            "chapter_addiction",
+            "character_consistency",
+            "planning_architect",
+        ):
+            sel = select_rules(rules, selection=sample, intent=intent, surface="inline_suggestion")
+            self.assertTrue(sel.rules, msg=f"expected at least one rule for {intent}")
+            self.assertIn("Priority:", " ".join(sel.diagnosis), msg=repr(sel.diagnosis))
+
 
 if __name__ == "__main__":
     unittest.main()
