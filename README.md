@@ -55,22 +55,24 @@ uv pip install -e ./agent
 uv pip install -r backend/requirements.txt
 ```
 
-This installs the **`liteauthor_agent`** package in editable mode plus FastAPI and the rest of the API stack.
+This installs the **`liteauthor_agent`** package in editable mode plus FastAPI and the rest of the API stack. The backend requirements install the agent with MLX extras so the default model path runs in-process.
 
 ## Run (development)
 
-**Terminal 1 — API** (venv **activated**)
+**Terminal 1 — API**
 
 ```bash
-cd backend
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
+bash backend/start.sh
 ```
 
-If you prefer not to activate the venv, use the interpreter explicitly:
+The startup script uses `backend/.venv`, installs missing dependencies, and ensures the in-process MLX packages are present.
+
+If you prefer to run the server directly after `backend/.venv` exists:
 
 ```bash
 cd backend
-../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8787   # Linux / macOS
+source .venv/bin/activate
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
 ```
 
 From the repo root (same idea: only works if that interpreter exists):
@@ -79,7 +81,7 @@ From the repo root (same idea: only works if that interpreter exists):
 npm run api
 ```
 
-`npm run api` runs `python3` from your **current** shell, so activate `.venv` first (or adjust the script to point at `.venv/bin/python`).
+`npm run api` runs the same backend startup script.
 
 **Terminal 2 — UI**
 
@@ -135,22 +137,27 @@ The repository ignores `graphify-out/cache/`, but the report, JSON, and HTML out
 
 ## Local model
 
-Configure the **agent** stack (read by `liteauthor_agent.llm_gateway`) for an OpenAI-compatible server:
+By default, the **agent** stack (read by `liteauthor_agent.llm_gateway`) runs direct in-process MLX from the Python backend:
+
+```bash
+export LITEAUTHOR_LLM_PROVIDER=mlx
+export MLX_MODEL=Jackrong/MLX-Qwopus3.5-9B-v3-4bit
+export MLX_AUTOCOMPLETE_MODEL=prism-ml/Ternary-Bonsai-8B-mlx-2bit
+export MLX_AUTOCOMPLETE_BACKEND=lm
+```
+
+If you install the agent package by hand, include the MLX extra:
+
+```bash
+pip install -e './agent[mlx]'
+```
+
+To use an OpenAI-compatible HTTP server instead:
 
 ```bash
 export LITEAUTHOR_LLM_PROVIDER=openai
 export OPENAI_BASE_URL=http://127.0.0.1:8080/v1
 export OPENAI_MODEL=default
-```
-
-Or run MLX directly in the backend process, without a separate model server:
-
-```bash
-pip install -e './agent[mlx]'
-export LITEAUTHOR_LLM_PROVIDER=mlx
-export MLX_MODEL=Jackrong/MLX-Qwopus3.5-9B-v3-4bit
-export MLX_AUTOCOMPLETE_MODEL=prism-ml/Ternary-Bonsai-8B-mlx-2bit
-export MLX_AUTOCOMPLETE_BACKEND=lm
 ```
 
 Optional: `LITEAUTHOR_MAX_CONTEXT_CHARS` (default `12000`) for scene packet size. See [`.env.example`](.env.example).
@@ -165,7 +172,7 @@ Not bundled in-repo. A future Tauri shell can wrap `frontend/dist` and ship alon
 agent/liteauthor_agent/
   agents/              # Role-specific prompt fragments
   context_engine/      # Scene packet / retrieval assembly
-  llm_gateway/         # OpenAI-compatible HTTP client
+  llm_gateway/         # In-process MLX and optional OpenAI-compatible HTTP client
   orchestrator/        # Multi-step jobs (e.g. sample continuity pipeline)
   prompt_templates/    # System / instruction strings
   routers/             # Reserved for a standalone agent ASGI service

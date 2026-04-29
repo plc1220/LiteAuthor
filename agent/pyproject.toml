@@ -15,7 +15,10 @@ mlx = [
   "mlx-lm>=0.30.7",
   "mlx-vlm>=0.4.3",
 ]
-all = []
+all = [
+  "mlx-lm>=0.30.7",
+  "mlx-vlm>=0.4.3",
+]
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

@@ -12,7 +12,7 @@ import {Decoration, DecorationSet} from '@tiptap/pm/view';
 import type {Node as PMNode} from '@tiptap/pm/model';
 import {markdownToTipTapDoc, tipTapDocToMarkdown} from '../lib/markdownDoc';
 import {api} from '../lib/api';
-import {searchSlashCommands, type WritingCommand, type WritingCommandId} from '../lib/writingCommands';
+import {searchSlashCommands, type CommandId, type CommandPaletteItem} from '../lib/writingCommands';
 
 export type ManuscriptEditorHandle = {
   getEditor: () => Editor | null;
@@ -45,8 +45,8 @@ type Props = {
   typewriterScrollParentRef?: RefObject<HTMLElement | null>;
   memoryTerms?: string[];
   onEntityClick?: (label: string) => void;
-  commands?: WritingCommand[];
-  onCommand?: (commandId: WritingCommandId, scope: CommandScope, freeform?: string) => void;
+  commands?: CommandPaletteItem[];
+  onCommand?: (commandId: CommandId, scope: CommandScope, freeform?: string) => void;
   onPreviewAction?: (action: 'accept' | 'reject' | 'insert_below') => void;
 };
 
@@ -328,7 +328,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     }
   };
 
-  const runSlashCommand = (ed: Editor, menu = slashMenu, command?: WritingCommand) => {
+  const runSlashCommand = (ed: Editor, menu = slashMenu, command?: CommandPaletteItem) => {
     if (!menu) return false;
     const matches = searchSlashCommands(menu.query);
     const selected = command ?? matches[menu.activeIndex] ?? matches[0];

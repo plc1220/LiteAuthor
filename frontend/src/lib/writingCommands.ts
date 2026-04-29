@@ -1,14 +1,24 @@
 import {
+  Activity,
+  AlertTriangle,
+  BookOpen,
   ChevronsRight,
+  ChevronDown,
   Edit3,
   Feather,
+  Link2,
   MessageCircle,
   Minimize2,
   Moon,
   Paintbrush,
   Plus,
+  ScrollText,
   Sparkles,
+  UserCheck,
+  UserCircle,
+  Waypoints,
   WandSparkles,
+  Zap,
 } from 'lucide-react';
 
 export type WritingCommandId =
@@ -24,6 +34,22 @@ export type WritingCommandId =
   | 'next_beat'
   | 'custom';
 
+export type StorycraftCommandId =
+  | 'story_tension'
+  | 'story_dialogue'
+  | 'story_ending'
+  | 'story_intent'
+  | 'story_opening'
+  | 'story_pacing'
+  | 'story_character'
+  | 'story_payoff'
+  | 'story_lore'
+  | 'story_addiction'
+  | 'story_cont_check'
+  | 'story_planner';
+
+export type CommandId = WritingCommandId | StorycraftCommandId;
+
 export type CommandScopeMode = 'selection' | 'cursor' | 'scene' | 'chapter';
 export type CommandContextProfile = 'inline' | 'scene' | 'chapter';
 export type CommandOperation =
@@ -36,6 +62,7 @@ export type CommandOperation =
 
 export type WritingCommand = {
   id: WritingCommandId;
+  kind: 'write';
   label: string;
   slash: string[];
   group: 'Write' | 'Shape' | 'Mood' | 'Scene';
@@ -47,9 +74,24 @@ export type WritingCommand = {
   requiresSelection?: boolean;
 };
 
+export type StorycraftCommand = {
+  id: StorycraftCommandId;
+  kind: 'storycraft';
+  label: string;
+  slash: string[];
+  group: 'Outcome' | 'Craft' | 'Deep craft';
+  title: string;
+  icon: typeof Edit3;
+  intent: string;
+  chapterPosition: string | null;
+};
+
+export type CommandPaletteItem = WritingCommand | StorycraftCommand;
+
 export const WRITING_COMMANDS: WritingCommand[] = [
   {
     id: 'continue',
+    kind: 'write',
     label: 'Continue',
     slash: ['continue', 'cont'],
     group: 'Write',
@@ -61,6 +103,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'finish_sentence',
+    kind: 'write',
     label: 'Finish sentence',
     slash: ['finish sentence', 'finish'],
     group: 'Write',
@@ -72,6 +115,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'rewrite',
+    kind: 'write',
     label: 'Rewrite',
     slash: ['rewrite', 'rephrase'],
     group: 'Shape',
@@ -83,6 +127,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'expand',
+    kind: 'write',
     label: 'Expand',
     slash: ['expand'],
     group: 'Shape',
@@ -94,6 +139,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'shorten',
+    kind: 'write',
     label: 'Shorten',
     slash: ['shorten', 'condense'],
     group: 'Shape',
@@ -105,6 +151,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'tone_darker',
+    kind: 'write',
     label: 'Darken',
     slash: ['darken', 'make darker', 'make this darker', 'tone darker'],
     group: 'Mood',
@@ -116,6 +163,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'describe_setting',
+    kind: 'write',
     label: 'Describe setting',
     slash: ['describe setting', 'describe room', 'setting'],
     group: 'Scene',
@@ -127,6 +175,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'emotional_beat',
+    kind: 'write',
     label: 'Emotional beat',
     slash: ['emotional beat', 'emotion'],
     group: 'Scene',
@@ -138,6 +187,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'finish_dialogue',
+    kind: 'write',
     label: 'Finish dialogue',
     slash: ['finish dialogue', 'dialogue'],
     group: 'Write',
@@ -149,6 +199,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'next_beat',
+    kind: 'write',
     label: 'Next beat',
     slash: ['next beat', 'next action'],
     group: 'Scene',
@@ -160,6 +211,7 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
   {
     id: 'custom',
+    kind: 'write',
     label: 'Custom',
     slash: ['do'],
     group: 'Shape',
@@ -171,21 +223,165 @@ export const WRITING_COMMANDS: WritingCommand[] = [
   },
 ];
 
-export function findSlashCommand(raw: string): WritingCommand | null {
+export const STORYCRAFT_COMMANDS: StorycraftCommand[] = [
+  {
+    id: 'story_tension',
+    kind: 'storycraft',
+    label: 'Add tension',
+    slash: ['add tension', 'tension'],
+    group: 'Outcome',
+    title: 'More friction, risk, and pressure',
+    icon: AlertTriangle,
+    intent: 'increase_tension',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_dialogue',
+    kind: 'storycraft',
+    label: 'Sharper dialogue',
+    slash: ['sharper dialogue', 'dialogue craft'],
+    group: 'Outcome',
+    title: 'Rhythm, subtext, and contrast in speech',
+    icon: MessageCircle,
+    intent: 'sharpen_dialogue',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_ending',
+    kind: 'storycraft',
+    label: 'Stronger ending',
+    slash: ['stronger ending', 'ending'],
+    group: 'Outcome',
+    title: 'End beat with momentum and curiosity',
+    icon: ChevronDown,
+    intent: 'strengthen_chapter_ending',
+    chapterPosition: 'ending',
+  },
+  {
+    id: 'story_intent',
+    kind: 'storycraft',
+    label: 'Rewrite w/ intent',
+    slash: ['rewrite with intent', 'intent'],
+    group: 'Outcome',
+    title: 'Tighter scene purpose, preserve facts and voice',
+    icon: Sparkles,
+    intent: 'rewrite_with_intent',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_opening',
+    kind: 'storycraft',
+    label: 'Opening doctor',
+    slash: ['opening doctor', 'opening', 'hook'],
+    group: 'Craft',
+    title: 'Hook, orientation, and first-beat pull',
+    icon: BookOpen,
+    intent: 'opening_doctor',
+    chapterPosition: 'opening',
+  },
+  {
+    id: 'story_pacing',
+    kind: 'storycraft',
+    label: 'Pacing tune',
+    slash: ['pacing tune', 'pacing'],
+    group: 'Craft',
+    title: 'Rhythm, compression, and scene turns',
+    icon: Activity,
+    intent: 'pacing_analyzer',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_character',
+    kind: 'storycraft',
+    label: 'Character drive',
+    slash: ['character drive', 'drive'],
+    group: 'Craft',
+    title: 'Want, reaction, and choice in voice',
+    icon: UserCircle,
+    intent: 'character_engine',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_payoff',
+    kind: 'storycraft',
+    label: 'Setup & payoff',
+    slash: ['setup payoff', 'payoff'],
+    group: 'Craft',
+    title: 'Strengthen thread promise and satisfaction',
+    icon: Link2,
+    intent: 'payoff_tracker',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_lore',
+    kind: 'storycraft',
+    label: 'Lore compress',
+    slash: ['lore compress', 'lore'],
+    group: 'Deep craft',
+    title: 'Scene-embedded world facts, less lecture',
+    icon: ScrollText,
+    intent: 'lore_compression',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_addiction',
+    kind: 'storycraft',
+    label: 'Addiction beat',
+    slash: ['addiction beat', 'serial pull'],
+    group: 'Deep craft',
+    title: 'Serial pull, curiosity, and stakes',
+    icon: Zap,
+    intent: 'chapter_addiction',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_cont_check',
+    kind: 'storycraft',
+    label: 'Char match',
+    slash: ['char match', 'character consistency'],
+    group: 'Deep craft',
+    title: 'Behavior and voice against persona',
+    icon: UserCheck,
+    intent: 'character_consistency',
+    chapterPosition: null,
+  },
+  {
+    id: 'story_planner',
+    kind: 'storycraft',
+    label: 'Story plan',
+    slash: ['story plan', 'planning'],
+    group: 'Deep craft',
+    title: 'Act spines, turns, outline-level help',
+    icon: Waypoints,
+    intent: 'planning_architect',
+    chapterPosition: null,
+  },
+];
+
+export const COMMAND_PALETTE: CommandPaletteItem[] = [...WRITING_COMMANDS, ...STORYCRAFT_COMMANDS];
+
+export function isStorycraftCommandId(id: CommandId): id is StorycraftCommandId {
+  return STORYCRAFT_COMMANDS.some((command) => command.id === id);
+}
+
+export function getStorycraftCommand(id: StorycraftCommandId): StorycraftCommand | undefined {
+  return STORYCRAFT_COMMANDS.find((command) => command.id === id);
+}
+
+export function findSlashCommand(raw: string): CommandPaletteItem | null {
   const query = raw.trim().toLowerCase();
   if (!query) return null;
   return (
-    WRITING_COMMANDS.find((command) => command.slash.some((alias) => alias === query)) ??
-    WRITING_COMMANDS.find((command) => command.slash.some((alias) => alias.startsWith(query))) ??
+    COMMAND_PALETTE.find((command) => command.slash.some((alias) => alias === query)) ??
+    COMMAND_PALETTE.find((command) => command.slash.some((alias) => alias.startsWith(query))) ??
     null
   );
 }
 
-export function searchSlashCommands(raw: string): WritingCommand[] {
+export function searchSlashCommands(raw: string): CommandPaletteItem[] {
   const query = raw.trim().toLowerCase();
-  if (!query) return WRITING_COMMANDS.slice(0, 8);
-  return WRITING_COMMANDS.filter((command) => {
+  if (!query) return COMMAND_PALETTE.slice(0, 8);
+  return COMMAND_PALETTE.filter((command) => {
     return command.label.toLowerCase().includes(query) || command.slash.some((alias) => alias.includes(query));
   }).slice(0, 8);
 }
-
