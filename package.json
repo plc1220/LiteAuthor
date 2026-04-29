@@ -6,6 +6,6 @@
     "build": "npm run build --prefix frontend",
     "lint": "npm run lint --prefix frontend",
     "preview": "npm run preview --prefix frontend",
-    "api": "cd backend && python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8787"
+    "api": "bash backend/start.sh"
   }
 }

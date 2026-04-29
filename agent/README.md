@@ -2,16 +2,16 @@
 
 Context assembly, prompt templates, LLM gateway, role helpers, and orchestration used by the FastAPI backend.
 
-Install **inside an activated virtual environment** (see the repo root `README.md` — create `.venv` first, then):
+Install **inside an activated virtual environment** (see the repo root `README.md`). Include the MLX extra for the default in-process backend model path:
 
 ```bash
-pip install -e ./agent
+pip install -e './agent[mlx]'
 ```
 
 Or with **uv**:
 
 ```bash
-uv pip install -e ./agent
+uv pip install -e './agent[mlx]'
 ```
 
-Environment variables are documented in the repo root [`.env.example`](../.env.example) (OpenAI-compatible server and optional `LITEAUTHOR_MAX_CONTEXT_CHARS`).
+Environment variables are documented in the repo root [`.env.example`](../.env.example) (direct MLX by default, optional OpenAI-compatible server, and `LITEAUTHOR_MAX_CONTEXT_CHARS`).

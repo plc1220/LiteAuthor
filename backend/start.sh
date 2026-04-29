@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ── LiteAuthor Backend Startup Script ──────────────────────────────
-# Usage:  ./start-backend.sh
+# Usage:  ./start.sh
 #
 # Creates a .venv in backend/.venv, installs dependencies,
 # and starts the FastAPI dev server.
@@ -37,6 +37,17 @@ fi
 if [ ! -d ".venv" ]; then
   echo "Creating .venv with $("${PYTHON_BIN}" --version) ..."
   "${PYTHON_BIN}" -m venv .venv
+  .venv/bin/python -m pip install --upgrade pip
+  .venv/bin/python -m pip install -r requirements.txt
+fi
+
+if ! .venv/bin/python - <<'PY' >/dev/null 2>&1
+import liteauthor_agent
+import mlx_lm
+import mlx_vlm
+PY
+then
+  echo "Installing backend dependencies, including in-process MLX support ..."
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements.txt
 fi

@@ -19,7 +19,7 @@ import {SelectionToolbar, type Action} from '../components/SelectionToolbar';
 import {ContextInspector} from '../components/ContextInspector';
 import {SuggestionPanel, type SuggestionAlternative} from '../components/SuggestionPanel';
 import {api} from '../lib/api';
-import {WRITING_COMMANDS, type WritingCommandId} from '../lib/writingCommands';
+import {COMMAND_PALETTE, getStorycraftCommand, isStorycraftCommandId, type CommandId, type StorycraftCommandId} from '../lib/writingCommands';
 
 export default function ZenEditor({onNavigate}: NavigationProps) {
   const editorRef = useRef<ManuscriptEditorHandle>(null);
@@ -250,51 +250,26 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     };
   };
 
-  const runStorycraft = async (action: Action) => {
-    if (
-      action !== 'story_tension' &&
-      action !== 'story_dialogue' &&
-      action !== 'story_ending' &&
-      action !== 'story_intent' &&
-      action !== 'story_opening' &&
-      action !== 'story_pacing' &&
-      action !== 'story_character' &&
-      action !== 'story_payoff' &&
-      action !== 'story_lore' &&
-      action !== 'story_addiction' &&
-      action !== 'story_cont_check' &&
-      action !== 'story_planner'
-    ) {
-      return;
-    }
+  const runStorycraft = async (action: StorycraftCommandId, providedScope?: CommandScope) => {
     const handle = editorRef.current;
     if (!handle || !activeProject) return;
     handle.clearGhostText();
-    const sel = handle.getSelection();
-    setLastSelection(sel);
-    const text = sel.text.trim();
+    handle.clearInlinePreview();
+    const scope = providedScope ?? handle.getCommandScope();
+    const operation = operationForAction(action, scope);
+    const previewBase = previewForOperation(operation, scope, '');
+    const text = scope.selection.text.trim() || scope.currentParagraph.text.trim();
+    setLastSelection({from: previewBase.range.from, to: previewBase.range.to, text: previewBase.original || text});
     if (text.length < 2) {
       setProposal({
         original: '',
         proposed: '',
-        explanation: 'Select a sentence or paragraph before running a storycraft outcome.',
+        explanation: 'Select text or place the cursor in a paragraph before running a storycraft outcome.',
       });
       return;
     }
-    const cfg = {
-      story_tension: {intent: 'increase_tension', chapter_position: null as string | null},
-      story_dialogue: {intent: 'sharpen_dialogue', chapter_position: null as string | null},
-      story_ending: {intent: 'strengthen_chapter_ending', chapter_position: 'ending' as const},
-      story_intent: {intent: 'rewrite_with_intent', chapter_position: null as string | null},
-      story_opening: {intent: 'opening_doctor', chapter_position: 'opening' as const},
-      story_pacing: {intent: 'pacing_analyzer', chapter_position: null as string | null},
-      story_character: {intent: 'character_engine', chapter_position: null as string | null},
-      story_payoff: {intent: 'payoff_tracker', chapter_position: null as string | null},
-      story_lore: {intent: 'lore_compression', chapter_position: null as string | null},
-      story_addiction: {intent: 'chapter_addiction', chapter_position: null as string | null},
-      story_cont_check: {intent: 'character_consistency', chapter_position: null as string | null},
-      story_planner: {intent: 'planning_architect', chapter_position: null as string | null},
-    }[action];
+    const cfg = getStorycraftCommand(action);
+    if (!cfg) return;
     setAiBusy(true);
     setProposal(null);
     setPendingAction(null);
@@ -304,13 +279,18 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         surface: 'inline_suggestion',
         intent: cfg.intent,
         selection: text,
-        chapter_position: cfg.chapter_position,
+        chapter_position: cfg.chapterPosition,
         run_model: true,
       });
+      const proposed = (res.rewrite || '').trim();
+      const preview = previewForOperation(operation, scope, proposed);
+      handle.showInlinePreview(preview);
       const hint = [res.rewrite && `~${res.packet_meta.approx_tokens ?? 0} tok`].filter(Boolean).join(' ');
       setProposal({
-        original: text,
-        proposed: (res.rewrite || '').trim(),
+        original: preview.original || text,
+        proposed,
+        operation: {...operation, text: proposed} as InlineOperation,
+        preview,
         explanation: [
           res.diagnosis.length ? res.diagnosis.join(' ') : null,
           res.warnings.length ? res.warnings.join(' ') : null,
@@ -319,7 +299,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         ]
           .filter(Boolean)
           .join(' — '),
-        task: 'Storycraft outcome',
+        task: cfg.label,
         contextPacket: undefined,
         contextTokens: res.packet_meta.approx_tokens,
       });
@@ -397,27 +377,18 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       setProposal(null);
       return;
     }
-    if (
-      action === 'story_tension' ||
-      action === 'story_dialogue' ||
-      action === 'story_ending' ||
-      action === 'story_intent' ||
-      action === 'story_opening' ||
-      action === 'story_pacing' ||
-      action === 'story_character' ||
-      action === 'story_payoff' ||
-      action === 'story_lore' ||
-      action === 'story_addiction' ||
-      action === 'story_cont_check' ||
-      action === 'story_planner'
-    ) {
+    if (isStorycraftCommandId(action)) {
       void runStorycraft(action);
       return;
     }
     void runAi(action);
   };
 
-  const handleInlineCommand = (commandId: WritingCommandId, scope: CommandScope, freeform?: string) => {
+  const handleInlineCommand = (commandId: CommandId, scope: CommandScope, freeform?: string) => {
+    if (isStorycraftCommandId(commandId)) {
+      void runStorycraft(commandId, scope);
+      return;
+    }
     if (commandId === 'custom' && freeform) {
       void runAi(commandId, freeform, scope, freeform);
       return;
@@ -1018,7 +989,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               sceneId={activeSceneId}
               typewriterScrollParentRef={mainScrollRef}
               memoryTerms={memoryTerms}
-              commands={WRITING_COMMANDS}
+              commands={COMMAND_PALETTE}
               onCommand={handleInlineCommand}
               onPreviewAction={handlePreviewAction}
               onEntityClick={(label) => setEntityCard(label)}
