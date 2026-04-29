@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import re
 import uuid
 from pathlib import Path
@@ -10,20 +12,42 @@ from ..database import connect_project_db, get_project_root
 from ..schemas import CanvasAnalyzeRequest, CanvasAutosortRequest, CanvasCaptureRequest, CaptureProposal, StoryCanvas
 
 router = APIRouter(prefix="/api/projects/{project_id}/canvas", tags=["canvas"])
+logger = logging.getLogger(__name__)
 
 CANVAS_REL = Path("story") / "canvases" / "story.canvas"
 
 TYPE_COLORS = {
     "Artifact": "#f5ead7",
     "Theme": "#f3d2c1",
+    "Premise": "#d7e7d1",
+    "AntiPremise": "#ead2d8",
+    "Stance": "#d9d4f2",
     "Character": "#d7e7d1",
     "Timeline": "#d4e2f2",
     "Scene": "#f8df9f",
     "Worldbuilding": "#d9d4f2",
     "Message": "#f0c8d2",
     "Mystery": "#efe3a5",
+    "Motif": "#e8d8bd",
+    "Question": "#efe3a5",
     "Reveal": "#c7e4df",
     "Rule": "#d7d3c8",
+}
+
+SEMANTIC_TARGETS = {
+    "Premise": "story/premise.md",
+    "Theme": "story/themes.md",
+    "Mystery": "story/unresolved_threads.md",
+    "AntiPremise": "story/premise.md",
+    "Stance": "story/worldview.md",
+    "Rule": "story/worldbuilding.md",
+    "Worldbuilding": "story/worldbuilding.md",
+    "Motif": "story/motifs.md",
+    "Question": "story/unresolved_threads.md",
+    "Reveal": "story/motifs.md",
+    "Message": "story/motifs.md",
+    "Timeline": "story/timeline.md",
+    "Scene": "story/outline.md",
 }
 
 
@@ -83,6 +107,259 @@ def _split_chunks(text: str) -> list[tuple[str, str]]:
     return normalized[:48]
 
 
+def _markdown_section_chunks(text: str) -> list[tuple[str, str]]:
+    lines = text.replace("\r\n", "\n").split("\n")
+    chunks: list[tuple[str, list[str]]] = []
+    current_title = _first_nonempty_line(text)
+    current: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        heading = re.match(r"^(#{1,4})\s+(.+)$", stripped)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            if level > 2:
+                current.append(line)
+                continue
+            if current and (level <= 2 or len("\n".join(current)) > 500):
+                chunks.append((current_title, current))
+                current = []
+            current_title = title or current_title
+            continue
+        if stripped == "---":
+            if current:
+                chunks.append((current_title, current))
+                current = []
+            continue
+        current.append(line)
+
+    if current:
+        chunks.append((current_title, current))
+
+    normalized: list[tuple[str, str]] = []
+    for title, body_lines in chunks:
+        body = "\n".join(body_lines).strip()
+        if body and len(body) >= 20:
+            normalized.append((title, body))
+    return normalized[:36]
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.replace("\r\n", "\n").split("\n"):
+        stripped = line.strip().lstrip("#").strip()
+        if stripped:
+            return stripped[:96]
+    return "Raw outline"
+
+
+def _sentences(text: str) -> list[str]:
+    compact = re.sub(r"[ \t]+", " ", text.replace("\r\n", "\n")).strip()
+    pieces = re.split(r"(?<=[。！？.!?])\s*|\n+", compact)
+    return [piece.strip(" \t-•") for piece in pieces if piece.strip(" \t-•")]
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    try:
+        data = json.loads(stripped)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(stripped[start : end + 1])
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _normalize_model_cards(data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_cards = data.get("cards")
+    if not isinstance(raw_cards, list):
+        return []
+    allowed = {
+        "Premise",
+        "Theme",
+        "Character",
+        "Mystery",
+        "Rule",
+        "Timeline",
+        "Scene",
+        "Worldbuilding",
+        "Motif",
+        "Question",
+        "AntiPremise",
+        "Stance",
+        "Message",
+        "Reveal",
+    }
+    cards: list[dict[str, Any]] = []
+    for item in raw_cards[:18]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        body = str(item.get("body") or item.get("content") or "").strip()
+        if not title or not body:
+            continue
+        kind = str(item.get("type") or item.get("kind") or "Scene").strip()
+        if kind not in allowed:
+            kind = "Question" if "?" in title or "？" in title else "Scene"
+        tags_raw = item.get("tags")
+        tags = [str(tag).strip()[:32] for tag in tags_raw if str(tag).strip()] if isinstance(tags_raw, list) else [kind]
+        try:
+            confidence = float(item.get("confidence", 0.78))
+        except (TypeError, ValueError):
+            confidence = 0.78
+        cards.append(
+            {
+                "type": kind,
+                "title": title[:96],
+                "body": body[:1800],
+                "tags": tags[:5],
+                "confidence": max(0.0, min(1.0, confidence)),
+            }
+        )
+    return cards
+
+
+async def _semantic_cards_bonsai(text: str) -> list[dict[str, Any]]:
+    prompt = f"""
+Extract movable story-canvas cards from the pasted writing notes.
+
+Return JSON only, no markdown, matching this schema:
+{{
+  "cards": [
+    {{
+      "type": "Premise | Theme | Character | Mystery | Rule | Timeline | Scene | Worldbuilding | Motif | Question",
+      "title": "short writer-facing title in the input language",
+      "body": "the relevant source meaning, rewritten only enough to stand alone",
+      "tags": ["short tags"],
+      "confidence": 0.0
+    }}
+  ]
+}}
+
+Rules:
+- Extract semantic meaning units, not line fragments.
+- Keep section labels as context; do not make cards like "这是一个关于：" unless they contain a complete idea.
+- Preserve the source language.
+- Prefer 4-10 strong cards over many weak cards.
+- Do not invent plot facts beyond the paste.
+
+PASTE:
+{text[:12000]}
+""".strip()
+    from liteauthor_agent.llm_gateway.mlx_client import canvas_extraction_mlx_sync
+
+    result = await asyncio.wait_for(
+        asyncio.to_thread(
+            canvas_extraction_mlx_sync,
+            [
+                {"role": "system", "content": "You are a concise story-structure extraction engine. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            1800,
+        ),
+        timeout=45,
+    )
+    data = _extract_json_object(result)
+    return _normalize_model_cards(data or {})
+
+
+def _semantic_cards_rule_fallback(text: str) -> list[dict[str, Any]]:
+    """General rule fallback; the model path should handle real semantic extraction."""
+    sentences = _sentences(text)
+    source_title = _first_nonempty_line(text)
+    cards: list[dict[str, Any]] = []
+
+    def add(kind: str, title: str, body: str, tags: list[str], confidence: float) -> None:
+        body = body.strip()
+        if not body or any(card["title"] == title for card in cards):
+            return
+        cards.append(
+            {
+                "type": kind,
+                "title": title[:96],
+                "body": body,
+                "tags": tags,
+                "confidence": confidence,
+            }
+        )
+
+    section_chunks = _markdown_section_chunks(text)
+    if len(section_chunks) >= 2 or len(text) > 4000:
+        for title, body in section_chunks:
+            if title == source_title and len(body) < 120:
+                continue
+            kind, tags, confidence = _classify(title, body)
+            lowered = f"{title}\n{body}".lower()
+            if "Manuscript Part" in tags:
+                kind = "Scene"
+            elif any(word in lowered for word in ("主题", "意义", "theme")):
+                kind = "Theme"
+            elif any(word in lowered for word in ("时间", "2147", "2163", "6000", "10000", "一万年")):
+                kind = "Timeline"
+            elif any(word in lowered for word in ("设定", "天体", "量子", "引力", "cyg", "欧米伽", "mqg")):
+                kind = "Worldbuilding"
+            elif any(word in lowered for word in ("战争", "委员会", "派")):
+                kind = "Rule"
+            add(kind, title, body[:1800], tags or [kind], max(confidence, 0.66))
+        if cards:
+            return cards[:24]
+
+    for sentence in sentences:
+        if len(sentence) < 12 or sentence.endswith(("：", ":")):
+            continue
+        if sentence == source_title:
+            continue
+        heading_like = len(sentence) <= 28 and not re.search(r"[。！？.!?，,；;]", sentence)
+        if heading_like and not any(word in sentence for word in ("是", "不是", "必须", "只能", "没有")):
+            continue
+        kind = "Question" if sentence.endswith(("？", "?")) or any(word in sentence for word in ("是否", "为什么", "如何")) else "Scene"
+        if any(word in sentence for word in ("主题", "意义", "信念", "价值")):
+            kind = "Theme"
+        elif any(word in sentence for word in ("谜", "秘密", "真相", "不存在", "第一")):
+            kind = "Mystery"
+        elif any(word in sentence for word in ("必须", "只能", "不可", "规则", "代价")):
+            kind = "Rule"
+        elif any(word in sentence for word in ("世界", "宇宙", "城市", "文明", "王国", "系统")):
+            kind = "Worldbuilding"
+        elif any(word in sentence for word in ("主角", "她", "他", "角色", "母亲", "父亲")):
+            kind = "Character"
+        title = sentence[:42].rstrip("，,。.!！?？")
+        add(kind, title, sentence, [kind], 0.62)
+        if len(cards) >= 10:
+            break
+
+    if len(cards) >= 3:
+        return cards
+
+    for title, body in _split_chunks(text):
+        kind, tags, confidence = _classify(title, body)
+        if len(body) < 12 or body.rstrip().endswith("："):
+            continue
+        add(kind, title, body, tags or [kind], confidence)
+    return cards[:12]
+
+
+async def _semantic_cards(text: str) -> tuple[list[dict[str, Any]], str]:
+    try:
+        cards = await _semantic_cards_bonsai(text)
+        if cards:
+            return cards, "model"
+    except Exception as exc:
+        logger.info("Canvas Bonsai extraction unavailable; using rule fallback: %s", exc)
+    return _semantic_cards_rule_fallback(text), "rule_fallback"
+
+
 def _classify(title: str, body: str) -> tuple[str, list[str], float]:
     text = f"{title}\n{body}".lower()
     tags: list[str] = []
@@ -125,8 +402,8 @@ def _proposals_for_node(node: dict[str, Any]) -> list[dict[str, Any]]:
     if not body:
         return proposals
 
-    if kind in {"Theme", "Rule", "Worldbuilding", "Mystery", "Reveal", "Message"}:
-        target = "story/unresolved_threads.md" if kind == "Mystery" else "story/motifs.md" if kind in {"Theme", "Reveal", "Message"} else "story/worldbuilding.md"
+    if kind in SEMANTIC_TARGETS:
+        target = SEMANTIC_TARGETS[kind]
         proposals.append(
             {
                 "id": f"proposal-{node_id}",
@@ -215,13 +492,20 @@ def _autosort(canvas: dict[str, Any], mode: str) -> dict[str, Any]:
             node["x"] = 100 + (i % 4) * 360
             node["y"] = 120 + (i // 4) * 220
     else:
+        source_nodes = [node for node in nodes if semantic(node) == "Artifact"]
+        if source_nodes:
+            for node in source_nodes:
+                node["x"] = 90
+                node["y"] = 120
         buckets: dict[str, list[dict[str, Any]]] = {}
         for node in nodes:
+            if semantic(node) == "Artifact":
+                continue
             buckets.setdefault(semantic(node), []).append(node)
         for col, kind in enumerate(sorted(buckets)):
             for row, node in enumerate(buckets[kind]):
-                node["x"] = 80 + col * 360
-                node["y"] = 120 + row * 220
+                node["x"] = 520 + col * 340
+                node["y"] = 100 + row * 220
 
     canvas["nodes"] = nodes
     canvas.setdefault("metadata", {})["layout_mode"] = mode
@@ -257,7 +541,15 @@ def _ui_artifacts(canvas: dict[str, Any]) -> list[dict[str, Any]]:
         kind = str(meta.get("semantic_type") or "note").lower()
         if kind == "artifact":
             continue
-        ui_kind = "question" if kind == "mystery" else "thread" if kind in {"theme", "rule", "worldbuilding"} else "beat" if kind in {"message", "reveal"} else "scene"
+        ui_kind = (
+            "question"
+            if kind == "mystery"
+            else "thread"
+            if kind in {"theme", "rule", "worldbuilding", "premise", "antipremise", "stance"}
+            else "beat"
+            if kind in {"message", "reveal"}
+            else "scene"
+        )
         text = str(node.get("text") or "")
         out.append(
             {
@@ -296,10 +588,11 @@ def _ui_hints(canvas: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 @router.post("/analyze")
-def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
+async def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
     root = _root(project_id)
-    chunks = _split_chunks(body.text)
+    cards, extraction_provider = await _semantic_cards(body.text)
     artifact_id = f"artifact-{uuid.uuid4().hex[:8]}"
+    source_title = body.title if body.title != "Artifact" else _first_nonempty_line(body.text)
     nodes: list[dict[str, Any]] = [
         {
             "id": artifact_id,
@@ -308,21 +601,25 @@ def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
             "y": 80,
             "width": 360,
             "height": 220,
-            "label": body.title,
+            "label": source_title,
             "text": body.text[:8000],
             "color": TYPE_COLORS["Artifact"],
-            "metadata": {"semantic_type": "Artifact", "status": "Inbox"},
+            "metadata": {"semantic_type": "Artifact", "status": "Source", "role": "Raw paste block"},
         }
     ]
     edges: list[dict[str, Any]] = []
     proposals: list[dict[str, Any]] = []
 
-    for i, (title, chunk) in enumerate(chunks):
-        kind, tags, confidence = _classify(title, chunk)
+    for i, card in enumerate(cards):
+        kind = str(card.get("type") or "Note")
+        title = str(card.get("title") or f"Card {i + 1}")
+        chunk = str(card.get("body") or "")
+        tags = list(card.get("tags") or [kind])
+        confidence = float(card.get("confidence") or 0.72)
         node_id = f"node-{uuid.uuid4().hex[:8]}"
         node = {
             "id": node_id,
-            "type": "text",
+            "type": "sticky",
             "x": 520 + (i % 3) * 330,
             "y": 80 + (i // 3) * 230,
             "width": 300,
@@ -335,6 +632,7 @@ def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
                 "tags": tags,
                 "confidence": confidence,
                 "source_artifact_id": artifact_id,
+                "suggested_targets": [SEMANTIC_TARGETS.get(kind, "story/unresolved_threads.md")],
             },
         }
         nodes.append(node)
@@ -343,23 +641,39 @@ def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
                 "id": f"edge-{uuid.uuid4().hex[:8]}",
                 "fromNode": artifact_id,
                 "toNode": node_id,
-                "label": "split into",
+                "label": "extracts",
                 "metadata": {},
             }
         )
         proposals.extend(_proposals_for_node(node))
 
-    canvas = _autosort({"version": "liteauthor.story-canvas.v1", "nodes": nodes, "edges": edges, "metadata": {"source": "artifact-analyze"}}, "type")
+    canvas = _autosort(
+        {
+            "version": "liteauthor.story-canvas.v1",
+            "nodes": nodes,
+            "edges": edges,
+            "metadata": {"source": "artifact-analyze", "extraction_provider": extraction_provider},
+        },
+        "type",
+    )
     _canvas_path(root).parent.mkdir(parents=True, exist_ok=True)
     _canvas_path(root).write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
     artifacts = _ui_artifacts(canvas)
+    logger.info(
+        "Canvas analyze project=%s extractor=%s cards=%s proposals=%s",
+        project_id,
+        extraction_provider,
+        len(artifacts),
+        len(proposals),
+    )
     return {
         "canvas": canvas,
         "proposals": proposals,
         "artifacts": artifacts,
         "hints": _ui_hints(canvas),
-        "summary": f"{len(artifacts)} cards · {len(proposals)} capture proposals",
+        "summary": f"{len(artifacts)} cards · {len(proposals)} capture proposals · extractor: {extraction_provider}",
         "capture": "Review the extracted cards, then capture selected material into wiki, timeline, or manuscript structure.",
+        "extraction_provider": extraction_provider,
     }
 
 
@@ -382,7 +696,7 @@ def autosort_canvas(project_id: str, body: dict[str, Any]):
     path = _canvas_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
-    return canvas
+    return {"canvas": canvas, "artifacts": _ui_artifacts(canvas), "hints": _ui_hints(canvas), "summary": f"Autosorted {len(canvas.get('nodes') or [])} canvas blocks by {mode}."}
 
 
 @router.post("/capture")

@@ -124,6 +124,7 @@ export type StoryCanvasApiResult = {
   review?: string;
   applied?: boolean;
   items?: {kind: string; target: string}[];
+  extraction_provider?: string;
 };
 
 export const api = {

@@ -113,10 +113,9 @@ Install the Graphify skill/slash command for Codex-compatible assistants:
 
 ```bash
 graphify install --platform codex
-graphify codex install
 ```
 
-`graphify install --platform codex` installs the `/graphify` skill command. `graphify codex install` writes the project-level `AGENTS.md` guidance and Codex hook.
+`graphify install --platform codex` installs the `/graphify` skill command.
 
 The current graph lives in [`graphify-out/`](graphify-out/):
 
@@ -126,7 +125,7 @@ The current graph lives in [`graphify-out/`](graphify-out/):
 | [`graphify-out/graph.json`](graphify-out/graph.json) | Queryable graph data for LLM workflows |
 | [`graphify-out/graph.html`](graphify-out/graph.html) | Interactive browser visualization |
 
-Codex guidance is in [`AGENTS.md`](AGENTS.md), with a local `.codex/hooks.json` reminder to read the graph report before architecture/codebase questions. To refresh the code graph after edits:
+Codex guidance is in [`AGENTS.md`](AGENTS.md). Graphify is opt-in for this repo: use the `/graphify` command or explicitly ask for Graphify before reading graph outputs. To refresh the code graph after edits:
 
 ```bash
 graphify update .

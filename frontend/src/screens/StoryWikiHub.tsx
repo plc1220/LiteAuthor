@@ -116,7 +116,9 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
           <div className="max-w-2xl">
             <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">{activeProject?.name ?? 'No project selected'}</p>
             <h1 className="mt-1 text-4xl font-semibold italic text-primary">The Codex</h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">Build the plot on two workbenches—canvas and timeline—look up the truth in one Story Bible, and refine with checks and history. Prose lives in the editor: Continue writing is your door back in.</p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">
+              Throw loose ideas into the Canvas. Distill them into Timeline and Story Bible canon. Then return to the editor with cleaner story memory.
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -181,7 +183,7 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
                 <span className="min-w-0 pt-0.5">
                   <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Story canvas</span>
                   <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">The chaos</span>
-                  <span className="mt-1 block text-sm leading-6 text-ink-muted">Throw ideas, images, and loose notes; arrange without committing to a single order yet.</span>
+                  <span className="mt-1 block text-sm leading-6 text-ink-muted">Drop messy notes, fragments, images, and scene ideas. LiteAuthor will help find the story shape.</span>
                 </span>
               </button>
               <button
@@ -214,9 +216,9 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
               </span>
               <span className="min-w-0 pt-0.5">
                 <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Story Bible</span>
-                <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">Encyclopedia</span>
+                <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">Canon</span>
                 <span className="mt-1 block text-sm leading-6 text-ink-muted">
-                  {wikiFiles.length} reference file{wikiFiles.length === 1 ? '' : 's'} in this project. Search from here or inside the Bible; open a note on the left, motif tracking in the same workspace.
+                  Characters, places, world rules, motifs, and unresolved questions the editor can remember while you write. {wikiFiles.length} reference file{wikiFiles.length === 1 ? '' : 's'} in this project.
                 </span>
               </span>
             </button>

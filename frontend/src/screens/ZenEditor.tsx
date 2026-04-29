@@ -1,12 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BookOpen,
-  Map as MapIcon,
-  Package,
   Brain,
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
   Download,
   History,
   Pencil,
@@ -14,20 +9,17 @@ import {
   Edit3,
   Save,
   Layers,
-  ScrollText,
   Trash2,
-  UserCheck,
-  Waypoints,
-  Zap,
 } from 'lucide-react';
 import {NavigationProps} from '../types';
 import {AppScaffold} from '../components/AppScaffold';
 import {useProjectStore} from '../stores/projectStore';
-import {ManuscriptEditor, type AutocompleteContext, type ManuscriptEditorHandle} from '../components/ManuscriptEditor';
+import {ManuscriptEditor, type AutocompleteContext, type CommandScope, type InlineOperation, type InlinePreview, type ManuscriptEditorHandle} from '../components/ManuscriptEditor';
 import {SelectionToolbar, type Action} from '../components/SelectionToolbar';
 import {ContextInspector} from '../components/ContextInspector';
 import {SuggestionPanel, type SuggestionAlternative} from '../components/SuggestionPanel';
 import {api} from '../lib/api';
+import {WRITING_COMMANDS, type WritingCommandId} from '../lib/writingCommands';
 
 export default function ZenEditor({onNavigate}: NavigationProps) {
   const editorRef = useRef<ManuscriptEditorHandle>(null);
@@ -44,6 +36,8 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   const [proposal, setProposal] = useState<{
     original: string;
     proposed: string;
+    operation?: InlineOperation;
+    preview?: InlinePreview;
     explanation?: string;
     task?: string;
     instruction?: string;
@@ -55,7 +49,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const [styleChoice, setStyleChoice] = useState('clearer');
   const [customInstruction, setCustomInstruction] = useState('');
-  const [toolsOpen, setToolsOpen] = useState(() => localStorage.getItem('liteauthor.editor.toolsOpen') === 'true');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [zenFocus, setZenFocus] = useState(() => localStorage.getItem('liteauthor.editor.zenFocus') === 'true');
   const [memoryTerms, setMemoryTerms] = useState<string[]>([]);
@@ -79,15 +72,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('liteauthor.editor.toolsOpen', String(toolsOpen));
-  }, [toolsOpen]);
-
-  useEffect(() => {
     localStorage.setItem('liteauthor.editor.zenFocus', String(zenFocus));
-  }, [zenFocus]);
-
-  useEffect(() => {
-    if (zenFocus) setToolsOpen(false);
   }, [zenFocus]);
 
   useEffect(() => {
@@ -163,9 +148,17 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
   };
 
-  const instructionFor = (action: Action, selection: string, style = styleInstruction()): {task: string; instruction: string; role: string} => {
-    const base = `Selection:\n${selection || '(cursor position)'}`;
+  const instructionFor = (action: Action, selection: string, style = styleInstruction(), scope?: CommandScope): {task: string; instruction: string; role: string} => {
+    const current = scope?.currentParagraph.text || selection || '(cursor position)';
+    const base = [
+      `Target:\n${selection || current}`,
+      scope ? `Previous context:\n${scope.previousParagraphs.join('\n\n') || '(none)'}` : null,
+      scope ? `Next context:\n${scope.nextParagraphs.join('\n\n') || '(none)'}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     switch (action) {
+      case 'rewrite':
       case 'rephrase':
         return {task: 'Rephrase selected text', instruction: `${base}\nRewrite the selected text. Keep the original meaning. ${style}`, role: 'literary_editor'};
       case 'expand':
@@ -175,12 +168,86 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       case 'tone':
         return {task: 'Change tone', instruction: `${base}\nRewrite the selected text with this direction: ${style}`, role: 'literary_editor'};
       case 'continue':
-        return {task: 'Continue scene', instruction: `${base}\nContinue for 2–4 sentences in the same voice.`, role: 'literary_editor'};
+        return {task: 'Continue scene', instruction: `${base}\nContinue from the cursor for 1–3 sentences in the same voice. Return only the continuation text.`, role: 'literary_editor'};
+      case 'finish_sentence':
+        return {task: 'Finish sentence', instruction: `${base}\nComplete the current unfinished sentence naturally. Return the full finished sentence only.`, role: 'literary_editor'};
+      case 'tone_darker':
+        return {task: 'Darken prose', instruction: `${base}\nRewrite the target paragraph with a darker mood and sharper atmosphere. Preserve story facts, POV, and tense.`, role: 'literary_editor'};
+      case 'describe_setting':
+        return {task: 'Describe setting', instruction: `${base}\nWrite one concise sensory setting beat that fits at the cursor. Return only prose to insert.`, role: 'literary_editor'};
+      case 'emotional_beat':
+        return {task: 'Add emotional beat', instruction: `${base}\nWrite one emotional reaction beat that fits at the cursor. Return only prose to insert.`, role: 'literary_editor'};
+      case 'finish_dialogue':
+        return {task: 'Finish dialogue', instruction: `${base}\nComplete the current dialogue line in character. Return the full finished sentence or line only.`, role: 'literary_editor'};
+      case 'next_beat':
+        return {task: 'Next beat', instruction: `${base}\nWrite the next action beat as a new paragraph. Return only the paragraph.`, role: 'literary_editor'};
       case 'custom':
-        return {task: 'Custom transform', instruction: `${base}\n${customInstruction.trim() || 'Transform the selected text while preserving story continuity.'}`, role: 'literary_editor'};
+        return {task: 'Custom transform', instruction: `${base}\n${style || customInstruction.trim() || 'Transform the target text while preserving story continuity.'}`, role: 'literary_editor'};
       default:
         return {task: 'Assist', instruction: base, role: 'literary_editor'};
     }
+  };
+
+  const operationForAction = (action: Action, scope: CommandScope): InlineOperation => {
+    const hasSelection = scope.selection.from !== scope.selection.to;
+    if (hasSelection) return {operation: 'replace_selection', text: ''};
+    switch (action) {
+      case 'continue':
+        return {operation: 'insert_after_cursor', text: ''};
+      case 'finish_sentence':
+      case 'finish_dialogue':
+        return {operation: 'replace_current_sentence', text: ''};
+      case 'describe_setting':
+      case 'emotional_beat':
+      case 'next_beat':
+        return {operation: 'insert_block_after', text: ''};
+      case 'expand':
+        return {operation: 'expand_choice', text: ''};
+      default:
+        return {operation: 'replace_current_paragraph', text: ''};
+    }
+  };
+
+  const previewForOperation = (operation: InlineOperation, scope: CommandScope, proposed: string): InlinePreview => {
+    const hasSelection = scope.selection.from !== scope.selection.to;
+    if (hasSelection) {
+      return {
+        operation: {...operation, operation: 'replace_selection', text: proposed},
+        range: {from: scope.selection.from, to: scope.selection.to},
+        insertPos: scope.selection.to,
+        original: scope.selection.text,
+        proposed,
+      };
+    }
+    if (operation.operation === 'insert_after_cursor') {
+      return {operation: {...operation, text: proposed}, range: {from: scope.cursor, to: scope.cursor}, insertPos: scope.cursor, original: '', proposed};
+    }
+    if (operation.operation === 'replace_current_sentence') {
+      return {
+        operation: {...operation, text: proposed},
+        range: {from: scope.currentSentence.from, to: scope.currentSentence.to},
+        insertPos: scope.currentSentence.to,
+        original: scope.currentSentence.text,
+        proposed,
+      };
+    }
+    if (operation.operation === 'insert_block_after') {
+      return {
+        operation: {...operation, text: proposed},
+        range: {from: scope.currentParagraph.to, to: scope.currentParagraph.to},
+        insertPos: scope.currentParagraph.to,
+        original: '',
+        proposed: `\n\n${proposed}`,
+      };
+    }
+    return {
+      operation: {...operation, text: proposed},
+      range: {from: scope.currentParagraph.from, to: scope.currentParagraph.to},
+      insertPos: scope.currentParagraph.to,
+      original: scope.currentParagraph.text,
+      proposed,
+      showInsertBelow: operation.operation === 'expand_choice',
+    };
   };
 
   const runStorycraft = async (action: Action) => {
@@ -267,22 +334,26 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
   };
 
-  const runAi = async (action: Action, style?: string) => {
+  const runAi = async (action: Action, style?: string, providedScope?: CommandScope, freeform?: string) => {
     const handle = editorRef.current;
     if (!handle || !activeProject) return;
     handle.clearGhostText();
-    const sel = handle.getSelection();
+    handle.clearInlinePreview();
+    const scope = providedScope ?? handle.getCommandScope();
+    const sel = scope.selection;
     setLastSelection(sel);
-    const text = sel.text.trim();
-    if (action !== 'continue' && text.length < 2) {
+    const operation = operationForAction(action, scope);
+    const targetText = sel.text.trim() || scope.currentParagraph.text.trim() || scope.currentSentence.text.trim();
+    if (operation.operation !== 'insert_after_cursor' && operation.operation !== 'insert_block_after' && targetText.length < 2) {
       setProposal({
         original: '',
         proposed: '',
-        explanation: 'Select a sentence or paragraph before running this action.',
+        explanation: 'Place the cursor in a sentence or paragraph before running this action.',
       });
       return;
     }
-    const {task, instruction, role} = instructionFor(action, text, style);
+    if (freeform) setCustomInstruction(freeform);
+    const {task, instruction, role} = instructionFor(action, targetText, style, scope);
     setAiBusy(true);
     setProposal(null);
     setPendingAction(null);
@@ -290,13 +361,18 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       const res = await api.zenAi(activeProject.id, {
         scene_id: activeSceneId,
         task,
-        selection: text,
+        selection: targetText,
         instruction,
         role,
       });
+      const opWithText = {...operation, text: res.text.trim()} as InlineOperation;
+      const preview = previewForOperation(operation, scope, res.text.trim());
+      handle.showInlinePreview(preview);
       setProposal({
-        original: text,
+        original: preview.original || targetText,
         proposed: res.text.trim(),
+        operation: opWithText,
+        preview,
         explanation: `Context ~${res.packet_meta.approx_tokens} tok, ${res.packet_meta.chunks_used} chunks`,
         task,
         instruction,
@@ -305,7 +381,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       });
     } catch (e) {
       setProposal({
-        original: text,
+        original: targetText,
         proposed: '',
         explanation: `Model error: ${(e as Error).message}`,
       });
@@ -315,7 +391,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   };
 
   const handleToolbarAction = (action: Action) => {
-    if (action === 'rephrase' || action === 'tone' || action === 'custom') {
+    if (action === 'rephrase' || action === 'rewrite' || action === 'tone' || action === 'custom') {
       editorRef.current?.clearGhostText();
       setPendingAction(action);
       setProposal(null);
@@ -339,6 +415,14 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       return;
     }
     void runAi(action);
+  };
+
+  const handleInlineCommand = (commandId: WritingCommandId, scope: CommandScope, freeform?: string) => {
+    if (commandId === 'custom' && freeform) {
+      void runAi(commandId, freeform, scope, freeform);
+      return;
+    }
+    void runAi(commandId, undefined, scope);
   };
 
   const requestAutocomplete = async (context: AutocompleteContext) => {
@@ -376,7 +460,10 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     if (!proposal?.proposed || !activeProject) return;
     const handle = editorRef.current;
     if (!handle) return;
-    const {from, to, text} = lastSelection;
+    const preview = proposal.preview;
+    const {from, to, text} = preview
+      ? {from: preview.range.from, to: preview.range.to, text: preview.original}
+      : lastSelection;
     try {
       const created = await api.createSuggestion(activeProject.id, {
         scene_id: activeSceneId,
@@ -387,11 +474,18 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         explanation: proposal.explanation,
         role: 'literary_editor',
       });
-      handle.replaceSelection(proposal.proposed);
+      handle.applyOperation(proposal.operation ?? {operation: 'replace_selection', text: proposal.proposed});
       await api.patchSuggestion(activeProject.id, created.id, 'accepted');
     } catch {
-      handle.replaceSelection(proposal.proposed);
+      handle.applyOperation(proposal.operation ?? {operation: 'replace_selection', text: proposal.proposed});
     }
+    setProposal(null);
+    setContextOpen(false);
+  };
+
+  const acceptProposalInsertBelow = async () => {
+    if (!proposal?.proposed) return;
+    editorRef.current?.applyOperation({operation: 'expand_choice', text: proposal.proposed, choice: 'insert_below'});
     setProposal(null);
     setContextOpen(false);
   };
@@ -412,8 +506,21 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     } catch {
       /* ignore */
     }
+    editorRef.current?.clearInlinePreview();
     setProposal(null);
     setContextOpen(false);
+  };
+
+  const handlePreviewAction = (action: 'accept' | 'reject' | 'insert_below') => {
+    if (action === 'accept') {
+      void acceptProposal();
+      return;
+    }
+    if (action === 'insert_below') {
+      void acceptProposalInsertBelow();
+      return;
+    }
+    void rejectProposal();
   };
 
   const handleDeleteScene = async (sceneId: string, title: string) => {
@@ -522,95 +629,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
   };
 
-  const toolGroups = [
-    {
-      label: 'Plan',
-      items: [
-        {
-          label: 'The Codex',
-          detail: 'Build zone: canvas and timeline',
-          icon: <MapIcon className="h-4 w-4" />,
-          onClick: () => goScreen('StoryWikiHub', 'push_back'),
-        },
-        {
-          label: 'Story Bible',
-          detail: 'Encyclopedia, lore, tracked motifs',
-          icon: <BookOpen className="h-4 w-4" />,
-          onClick: () => goScreen('StoryBible', 'push'),
-        },
-        {
-          label: 'Canvas',
-          detail: 'Loose notes and structure',
-          icon: <Layers className="h-4 w-4" />,
-          onClick: () => goScreen('StoryCanvas', 'push'),
-        },
-        {
-          label: 'Timeline',
-          detail: 'Events and reveal order',
-          icon: <Calendar className="h-4 w-4" />,
-          onClick: () => goScreen('TimelineView', 'push'),
-        },
-      ],
-    },
-    {
-      label: 'Check',
-      items: [
-        {
-          label: 'Continuity',
-          detail: 'Unresolved story flags',
-          icon: <BookOpen className="h-4 w-4" />,
-          onClick: () => goScreen('ContinuityCheckPanel', 'push'),
-        },
-        {
-          label: 'Agent pass',
-          detail: 'Longer AI review jobs',
-          icon: <Brain className="h-4 w-4" />,
-          onClick: () => goScreen('AgentMode', 'push'),
-        },
-      ],
-    },
-    {
-      label: 'Craft',
-      items: [
-        {
-          label: 'Lore compress',
-          detail: 'Select prose — embed worldbuilding in scene (storycraft)',
-          icon: <ScrollText className="h-4 w-4" />,
-          onClick: () => void runStorycraft('story_lore'),
-        },
-        {
-          label: 'Addiction beat',
-          detail: 'Make the next page feel inevitable (storycraft)',
-          icon: <Zap className="h-4 w-4" />,
-          onClick: () => void runStorycraft('story_addiction'),
-        },
-        {
-          label: 'Char match',
-          detail: 'Line voice up with character (storycraft)',
-          icon: <UserCheck className="h-4 w-4" />,
-          onClick: () => void runStorycraft('story_cont_check'),
-        },
-        {
-          label: 'Story plan',
-          detail: 'Tighten act or chapter spine in selection (storycraft)',
-          icon: <Waypoints className="h-4 w-4" />,
-          onClick: () => void runStorycraft('story_planner'),
-        },
-      ],
-    },
-    {
-      label: 'Preserve',
-      items: [
-        {
-          label: 'Versions',
-          detail: 'Snapshots and history',
-          icon: <Package className="h-4 w-4" />,
-          onClick: () => goScreen('VersionHistory', 'push'),
-        },
-      ],
-    },
-  ];
-
   return (
     <AppScaffold
       active="manuscript"
@@ -646,14 +664,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
             <span className="h-1.5 w-1.5 rounded-full bg-amber-wax" aria-hidden />
           </button>
           <span className="hidden text-ink-muted text-xs sm:inline">{wordCount.toLocaleString()} words</span>
-          <button
-            type="button"
-            className="hidden rounded-sm border border-oak-variant bg-sepia-mid px-2 py-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink lg:inline-flex"
-            onClick={() => setToolsOpen((value) => !value)}
-            aria-expanded={toolsOpen}
-          >
-            Tools
-          </button>
           <button
             type="button"
             className="p-2 hover:bg-sepia-high rounded-sm"
@@ -1008,6 +1018,9 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               sceneId={activeSceneId}
               typewriterScrollParentRef={mainScrollRef}
               memoryTerms={memoryTerms}
+              commands={WRITING_COMMANDS}
+              onCommand={handleInlineCommand}
+              onPreviewAction={handlePreviewAction}
               onEntityClick={(label) => setEntityCard(label)}
               onSaved={() => {
                 setLastSavedAt(new Date());
@@ -1041,69 +1054,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
           )}
         </main>
 
-        <aside
-          className={`${
-            zenFocus
-              ? 'hidden'
-              : 'hidden border-l border-oak-variant bg-sepia-low py-4 z-50 transition-[width] duration-200 lg:flex lg:flex-col'
-          } ${toolsOpen ? 'w-64 px-3' : 'w-12 items-center px-1'}`}
-        >
-          <button
-            type="button"
-            className={`mb-4 flex h-9 items-center rounded-sm border border-oak-variant bg-sepia-high font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary/50 ${
-              toolsOpen ? 'w-full justify-between px-3' : 'w-9 justify-center'
-            }`}
-            onClick={() => setToolsOpen((value) => !value)}
-            aria-label={toolsOpen ? 'Collapse writing tools' : 'Open writing tools'}
-            aria-expanded={toolsOpen}
-            title={toolsOpen ? 'Collapse writing tools' : 'Open writing tools'}
-          >
-            {toolsOpen ? (
-              <>
-                <span>Writing tools</span>
-                <ChevronRight className="h-4 w-4" />
-              </>
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
-
-          {toolsOpen ? (
-            <>
-              <div className="mb-5 border-b border-oak-variant pb-4">
-                <p className="text-xs leading-5 text-ink-muted">Keep writing here. Open these only when the scene needs planning, checking, or recovery.</p>
-              </div>
-              <div className="space-y-5 overflow-y-auto">
-                {toolGroups.map((group) => (
-                  <section key={group.label}>
-                    <h3 className="mb-2 font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">{group.label}</h3>
-                    <div className="space-y-1.5">
-                      {group.items.map((item) => (
-                        <button
-                          key={item.label}
-                          type="button"
-                          className="flex w-full items-start gap-3 rounded-sm border border-transparent px-2 py-2 text-left hover:border-oak-variant hover:bg-sepia-mid"
-                          onClick={item.onClick}
-                        >
-                          <span className="mt-0.5 text-primary">{item.icon}</span>
-                          <span className="min-w-0">
-                            <span className="block font-sans text-xs font-bold uppercase tracking-widest text-primary">{item.label}</span>
-                            <span className="mt-1 block text-xs leading-4 text-ink-muted">{item.detail}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-1 flex-col items-center gap-3 pt-2">
-              <Brain className="h-5 w-5 text-primary" />
-              <span className="vertical-rl font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted [writing-mode:vertical-rl]">Tools</span>
-            </div>
-          )}
-        </aside>
       </div>
 
       {entityCard ? (

@@ -52,6 +52,14 @@ def chat_completion_mlx_sync(messages: list[dict[str, str]], max_tokens: int = 2
         return mlx_lm.generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False) or ""
 
 
+def canvas_extraction_mlx_sync(messages: list[dict[str, str]], max_tokens: int = 1800) -> str:
+    mlx_lm = _require_mlx_lm()
+    with _model_lock:
+        model, tokenizer = _load_lm(MLX_AUTOCOMPLETE_MODEL)
+        prompt = _format_lm_prompt(tokenizer, messages)
+        return mlx_lm.generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False) or ""
+
+
 def inline_completion_mlx_sync(prompt: str, max_tokens: int = 24) -> str:
     if MLX_AUTOCOMPLETE_BACKEND == "lm":
         return _inline_completion_lm_sync(prompt, max_tokens=max_tokens)

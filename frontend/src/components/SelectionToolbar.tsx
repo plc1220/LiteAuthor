@@ -17,8 +17,10 @@ import {
   Waypoints,
   Zap,
 } from 'lucide-react';
+import {WRITING_COMMANDS, type WritingCommandId} from '../lib/writingCommands';
 
 export type Action =
+  | WritingCommandId
   | 'rephrase'
   | 'expand'
   | 'shorten'
@@ -38,14 +40,9 @@ export type Action =
   | 'story_cont_check'
   | 'story_planner';
 
-const ACTIONS: {id: Action; label: string; title: string; icon: typeof Edit3}[] = [
-  {id: 'rephrase', label: 'Rephrase', title: 'Rewrite with a chosen style', icon: Edit3},
-  {id: 'expand', label: 'Expand', title: 'Add texture and detail', icon: Plus},
-  {id: 'shorten', label: 'Shorten', title: 'Condense the selection', icon: Minimize2},
-  {id: 'tone', label: 'Tone', title: 'Shift the tone', icon: Feather},
-  {id: 'continue', label: 'Continue', title: 'Continue from the cursor', icon: ChevronDown},
-  {id: 'custom', label: 'Custom', title: 'Write a custom transform', icon: Sparkles},
-];
+const ACTIONS: {id: Action; label: string; title: string; icon: typeof Edit3}[] = WRITING_COMMANDS.filter((command) =>
+  ['continue', 'rewrite', 'expand', 'shorten', 'tone_darker', 'describe_setting', 'next_beat'].includes(command.id),
+).map((command) => ({id: command.id, label: command.label, title: command.title, icon: command.icon}));
 
 const STORY_OUTCOMES: {id: Action; label: string; title: string; icon: typeof Edit3}[] = [
   {id: 'story_tension', label: 'Add tension', title: 'More friction, risk, and pressure (scene craft rules)', icon: AlertTriangle},
@@ -87,7 +84,23 @@ export function SelectionToolbar({disabled, onAction}: Props) {
   }, [open]);
 
   return (
-    <div className="relative z-20 flex justify-center border-b border-oak-variant/60 py-2">
+    <div className="relative z-20 flex flex-wrap items-center justify-center gap-2 border-b border-oak-variant/60 py-2">
+      {ACTIONS.map((a) => {
+        const Icon = a.icon;
+        return (
+          <button
+            key={a.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onAction(a.id)}
+            title={a.title}
+            className="inline-flex items-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-high px-2.5 py-1.5 font-sans text-[10px] uppercase tracking-widest text-ink hover:border-primary hover:text-primary disabled:opacity-40"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span>{a.label}</span>
+          </button>
+        );
+      })}
       <div
         ref={rootRef}
         className="relative inline-block"
@@ -104,8 +117,8 @@ export function SelectionToolbar({disabled, onAction}: Props) {
           title="AI writing actions"
           aria-expanded={open}
         >
-          <span aria-hidden>✨</span>
-          AI studio
+          <span aria-hidden>+</span>
+          More craft
           <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
 
@@ -114,7 +127,7 @@ export function SelectionToolbar({disabled, onAction}: Props) {
             className="absolute left-1/2 top-full z-30 -mt-1 min-w-[220px] -translate-x-1/2 rounded-sm border border-oak-variant bg-surface-container-high py-1 pt-2 shadow-md"
             role="menu"
           >
-            {ACTIONS.map((a) => {
+            {WRITING_COMMANDS.filter((command) => !ACTIONS.some((action) => action.id === command.id)).map((a) => {
               const Icon = a.icon;
               return (
                 <button

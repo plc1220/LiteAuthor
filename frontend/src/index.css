@@ -368,6 +368,50 @@
     text-decoration-skip-ink: auto;
   }
 
+  .inline-edit-removed {
+    background: rgba(124, 45, 18, 0.2);
+    color: rgba(90, 39, 26, 0.72);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  .inline-edit-widget {
+    display: inline;
+  }
+
+  .inline-edit-added {
+    background: rgba(45, 106, 79, 0.18);
+    color: #244633;
+    border-bottom: 1px solid rgba(45, 106, 79, 0.38);
+    white-space: pre-wrap;
+  }
+
+  .inline-edit-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    vertical-align: baseline;
+    font-family: var(--font-sans);
+  }
+
+  .inline-edit-actions button {
+    border: 1px solid var(--color-oak-variant);
+    background: var(--color-sepia-high);
+    color: var(--color-ink);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .inline-edit-actions button:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+
   .zen-editor-shell {
     height: 100dvh;
     min-height: 100dvh;

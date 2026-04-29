@@ -200,8 +200,8 @@ export default function StoryBible({onNavigate}: NavigationProps) {
           <aside className="w-full shrink-0 border-b border-oak-variant bg-sepia-low/60 lg:w-56 lg:border-b-0 lg:border-r">
             <div className="p-4">
               <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Story Bible</p>
-              <h1 className="mt-1 font-serif text-xl italic text-primary">Encyclopedia</h1>
-              <p className="mt-2 text-xs leading-relaxed text-ink-muted/90">Canon, characters, and tracked motifs in one place.</p>
+              <h1 className="mt-1 font-serif text-xl italic text-primary">Canon</h1>
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted/90">Characters, places, world rules, motifs, and unresolved questions the editor can remember.</p>
             </div>
             <nav className="max-h-48 space-y-1 overflow-y-auto border-t border-oak-variant/60 px-2 py-2 lg:max-h-none">
               {hasMotifsFile ? (

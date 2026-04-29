@@ -1,21 +1,31 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import type {PointerEvent, WheelEvent} from 'react';
 import {
   ArrowUpDown,
   BookOpen,
   CheckCircle2,
   ClipboardPaste,
   Clock3,
+  Home,
   Layers3,
+  Link2,
+  Maximize2,
+  Minus,
+  Move,
+  Plus,
   RefreshCw,
   ScanSearch,
   Sparkles,
+  StickyNote,
   SlidersHorizontal,
+  Trash2,
   TriangleAlert,
   WandSparkles,
 } from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
 import {api} from '../lib/api';
+import type {CanvasNode, CaptureProposal, StoryCanvas as StoryCanvasData} from '../lib/api';
 
 type SortMode = 'semantic' | 'chronological' | 'density';
 type ArtifactKind = 'scene' | 'beat' | 'thread' | 'question' | 'promise' | 'note';
@@ -50,13 +60,18 @@ type CanvasAnalysis = {
 };
 
 type CanvasApiResult = Partial<CanvasAnalysis> & {
+  canvas?: StoryCanvasData;
   artifacts?: Array<Partial<CanvasArtifact> | Record<string, unknown>>;
   hints?: Array<Partial<CanvasHint> | Record<string, unknown>>;
   semantic_hints?: Array<Partial<CanvasHint> | Record<string, unknown>>;
+  proposals?: CaptureProposal[];
   capture?: string;
   review?: string;
   summary?: string;
   message?: string;
+  applied?: boolean;
+  items?: {kind: string; target: string}[];
+  extraction_provider?: string;
 };
 
 type CanvasApiClient = typeof api & {
@@ -66,12 +81,16 @@ type CanvasApiClient = typeof api & {
   ) => Promise<CanvasApiResult>;
   canvasAutosort?: (
     projectId: string,
-    body: {text: string; project_id?: string; mode: SortMode; artifacts?: CanvasArtifact[]},
+    body: {text: string; project_id?: string; mode: SortMode; artifacts?: CanvasArtifact[]; canvas?: StoryCanvasData},
   ) => Promise<CanvasApiResult>;
   canvasCapture?: (
     projectId: string,
-    body: {text: string; project_id?: string; mode: SortMode; selected_ids?: string[]; notes?: string; artifacts?: CanvasArtifact[]},
+    body:
+      | {text: string; project_id?: string; mode: SortMode; selected_ids?: string[]; notes?: string; artifacts?: CanvasArtifact[]}
+      | {proposals: CaptureProposal[]; apply: boolean},
   ) => Promise<CanvasApiResult>;
+  getCanvas?: (projectId: string) => Promise<StoryCanvasData>;
+  putCanvas?: (projectId: string, canvas: StoryCanvasData) => Promise<StoryCanvasData>;
 };
 
 type CaptureEntry = {
@@ -79,6 +98,11 @@ type CaptureEntry = {
   title: string;
   detail: string;
   at: string;
+};
+
+type AppliedOrderItem = {
+  kind: string;
+  target: string;
 };
 
 const canvasApi = api as CanvasApiClient;
@@ -288,6 +312,73 @@ function normalizeHint(input: Partial<CanvasHint> | Record<string, unknown>, fal
   };
 }
 
+function artifactFromNode(node: CanvasNode, fallbackIndex: number): CanvasArtifact {
+  const meta = node.metadata ?? {};
+  const semanticType = typeof meta.semantic_type === 'string' ? meta.semantic_type : node.type;
+  const content = node.text ?? '';
+  const uiKind: ArtifactKind =
+    semanticType === 'Mystery' || semanticType === 'Question'
+      ? 'question'
+      : ['Theme', 'Premise', 'AntiPremise', 'Stance', 'Rule', 'Worldbuilding', 'Motif'].includes(semanticType)
+        ? 'thread'
+        : ['Message', 'Reveal'].includes(semanticType)
+          ? 'beat'
+          : semanticType === 'Artifact'
+            ? 'note'
+            : 'scene';
+  return {
+    id: node.id,
+    title: node.label ?? `Card ${fallbackIndex + 1}`,
+    content,
+    excerpt: excerptFromBlock(content),
+    kind: uiKind,
+    score: Math.round(Number(meta.confidence ?? 0.65) * 100),
+    tags: Array.isArray(meta.tags) ? meta.tags.map(String).slice(0, 4) : [semanticType],
+    order: fallbackIndex,
+    status: semanticType === 'Mystery' ? 'review' : 'draft',
+  };
+}
+
+function canvasArtifacts(canvas: StoryCanvasData | null) {
+  return (canvas?.nodes ?? [])
+    .filter((node) => (node.metadata?.semantic_type ?? node.type) !== 'Artifact')
+    .map((node, index) => artifactFromNode(node, index));
+}
+
+function selectedCardInsights(artifact: CanvasArtifact | null) {
+  if (!artifact) {
+    return {
+      role: 'Nothing selected',
+      notes: ['Select a block to see extracted story notes.'],
+      suggestions: ['Read Chaos', 'Create Sticky'],
+    };
+  }
+  const text = `${artifact.title}\n${artifact.content}`;
+  const role =
+    artifact.tags.find((tag) => ['Theme', 'Premise', 'Mystery', 'AntiPremise', 'Stance'].includes(tag)) ??
+    (artifact.kind === 'question' ? 'Mystery / Open question' : artifact.kind === 'thread' ? 'Story concept' : 'Canvas note');
+  const notes = _clientStoryNotes(text);
+  const suggestions =
+    artifact.kind === 'question'
+      ? ['Add to Open Questions', 'Link to Time Logic', 'Find contradiction']
+      : artifact.tags.includes('Theme')
+        ? ['Add to Story Bible -> Themes', 'Link to Motifs', 'Use as writing constraint']
+        : artifact.tags.includes('Premise')
+          ? ['Add to Story Bible -> Core Premise', 'Suggest related cards', 'Connect to central mystery']
+          : ['Add to Story Bible', 'Suggest links', 'Keep on canvas'];
+  return {role, notes, suggestions};
+}
+
+function _clientStoryNotes(text: string) {
+  const sentences = text
+    .replace(/\r\n/g, '\n')
+    .split(/(?<=[。！？.!?])\s*|\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 6 && !line.endsWith('：'))
+    .slice(0, 5);
+  return sentences.length > 0 ? sentences : [excerptFromBlock(text)];
+}
+
 function buildHintsFromText(text: string, artifacts: CanvasArtifact[]) {
   const counts = new Map<string, number>();
   for (const word of words(text)) {
@@ -360,6 +451,16 @@ function buildLocalAnalysis(text: string): CanvasAnalysis {
   };
 }
 
+function buildDraftAnalysis(text: string): CanvasAnalysis {
+  const hasText = text.trim().length > 0;
+  return {
+    summary: hasText ? 'Paste loaded. Press Read Chaos to extract movable story cards.' : 'No artifacts yet. Paste story material to begin.',
+    artifacts: [],
+    hints: [],
+    capture: hasText ? 'Read Chaos will keep the raw paste as a source block, then extract candidate cards around it.' : undefined,
+  };
+}
+
 function sortArtifacts(artifacts: CanvasArtifact[], mode: SortMode) {
   const list = [...artifacts];
   if (mode === 'chronological') {
@@ -412,6 +513,18 @@ function currentTimeLabel() {
   }).format(new Date());
 }
 
+function proposalKindLabel(kind: string) {
+  if (kind === 'timeline_event') return 'Timeline';
+  if (kind === 'wiki') return 'Story Bible';
+  if (kind === 'chapter') return 'Manuscript';
+  return kind.replace(/_/g, ' ');
+}
+
+function proposalPreview(content: string) {
+  const compact = normalizeWhitespace(content.replace(/^#+\s+/gm, '').replace(/_Source canvas node:[^_]+_/g, ''));
+  return compact.length > 140 ? `${compact.slice(0, 137)}...` : compact;
+}
+
 export default function StoryCanvas({onNavigate}: NavigationProps) {
   const activeProject = useProjectStore((s) => s.activeProject);
 
@@ -420,12 +533,32 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [captureNotes, setCaptureNotes] = useState('');
   const [captures, setCaptures] = useState<CaptureEntry[]>([]);
+  const [orderProposals, setOrderProposals] = useState<CaptureProposal[]>([]);
+  const [selectedProposalIds, setSelectedProposalIds] = useState<Set<string>>(() => new Set());
+  const [lastAppliedItems, setLastAppliedItems] = useState<AppliedOrderItem[]>([]);
+  const [canvas, setCanvas] = useState<StoryCanvasData | null>(null);
+  const [viewport, setViewport] = useState({x: 0, y: 0, scale: 1});
+  const [contextMenu, setContextMenu] = useState<{nodeId: string; x: number; y: number} | null>(null);
+  const [lastReadText, setLastReadText] = useState('');
   const [analysisStatus, setAnalysisStatus] = useState('Local parse ready.');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isAutosorting, setIsAutosorting] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isApplyingOrder, setIsApplyingOrder] = useState(false);
+  const suggestedOrderRef = useRef<HTMLElement | null>(null);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<StoryCanvasData | null>(null);
+  const dragRef = useRef<
+    | {kind: 'node'; id: string; dx: number; dy: number}
+    | {kind: 'pan'; startX: number; startY: number; originX: number; originY: number}
+    | null
+  >(null);
 
   const storageKey = activeProject ? `liteauthor.story-canvas.${activeProject.id}` : null;
+
+  useEffect(() => {
+    canvasRef.current = canvas;
+  }, [canvas]);
 
   useEffect(() => {
     if (!storageKey || typeof window === 'undefined') return;
@@ -437,8 +570,36 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     setSortMode(savedSort === 'chronological' || savedSort === 'density' ? savedSort : 'semantic');
     setSelectedId(null);
     setCaptures([]);
+    setOrderProposals([]);
+    setSelectedProposalIds(new Set());
+    setLastAppliedItems([]);
+    setCanvas(null);
+    setContextMenu(null);
+    setViewport({x: 0, y: 0, scale: 1});
+    setLastReadText(savedText ?? '');
     setAnalysisStatus('Local parse ready.');
   }, [storageKey]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    let cancelled = false;
+    void canvasApi
+      .getCanvas?.(activeProject.id)
+      .then((remoteCanvas) => {
+        if (cancelled || !remoteCanvas.nodes?.length) return;
+        setCanvas(remoteCanvas);
+        const remoteArtifacts = canvasArtifacts(remoteCanvas);
+        setAnalysis((current) => ({
+          ...current,
+          artifacts: remoteArtifacts.length > 0 ? remoteArtifacts : current.artifacts,
+          summary: remoteArtifacts.length > 0 ? `${remoteArtifacts.length} canvas blocks loaded.` : current.summary,
+        }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject]);
 
   useEffect(() => {
     if (!storageKey || typeof window === 'undefined') return;
@@ -457,24 +618,35 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
   const localAnalysis = useMemo(() => buildLocalAnalysis(artifactText), [artifactText]);
 
-  const [analysis, setAnalysis] = useState<CanvasAnalysis>(() => buildLocalAnalysis(''));
+  const [analysis, setAnalysis] = useState<CanvasAnalysis>(() => buildDraftAnalysis(''));
 
   useEffect(() => {
-    setAnalysis(localAnalysis);
-  }, [localAnalysis]);
+    if (canvas?.nodes?.length) return;
+    setAnalysis(buildDraftAnalysis(artifactText));
+    setOrderProposals([]);
+    setSelectedProposalIds(new Set());
+    setLastAppliedItems([]);
+  }, [artifactText, canvas?.nodes?.length]);
 
   const artifacts = useMemo(() => sortArtifacts(analysis.artifacts, sortMode), [analysis.artifacts, sortMode]);
-  const selectedArtifact = useMemo(() => artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts[0] ?? null, [artifacts, selectedId]);
+  const selectedNode = useMemo(() => canvas?.nodes.find((node) => node.id === selectedId) ?? null, [canvas, selectedId]);
+  const selectedArtifact = useMemo(() => {
+    if (selectedNode) return artifactFromNode(selectedNode, 0);
+    return artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts[0] ?? null;
+  }, [artifacts, selectedId, selectedNode]);
+  const hasInput = artifactText.trim().length > 0;
+  const hasUnreadInput = hasInput && artifactText !== lastReadText;
 
   useEffect(() => {
     if (artifacts.length === 0) {
-      if (selectedId !== null) setSelectedId(null);
+      if (selectedId !== null && !canvas?.nodes.some((node) => node.id === selectedId)) setSelectedId(null);
       return;
     }
-    if (!selectedId || !artifacts.some((artifact) => artifact.id === selectedId)) {
+    const selectedExists = artifacts.some((artifact) => artifact.id === selectedId) || canvas?.nodes.some((node) => node.id === selectedId);
+    if (!selectedId || !selectedExists) {
       setSelectedId(artifacts[0].id);
     }
-  }, [artifacts, selectedId]);
+  }, [artifacts, canvas?.nodes, selectedId]);
 
   const keywordLine = useMemo(() => {
     if (artifacts.length === 0) return 'No artifacts detected yet.';
@@ -487,6 +659,40 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     );
     return `${kinds.scene} scenes · ${kinds.beat} beats · ${kinds.thread} threads · ${kinds.question} questions`;
   }, [artifacts]);
+
+  const selectedOrderProposals = useMemo(
+    () => orderProposals.filter((proposal) => selectedProposalIds.has(proposal.id)),
+    [orderProposals, selectedProposalIds],
+  );
+
+  const orderProposalSummary = useMemo(() => {
+    if (orderProposals.length === 0) return 'No order suggestions yet.';
+    const counts = orderProposals.reduce<Record<string, number>>((acc, proposal) => {
+      const label = proposalKindLabel(proposal.kind);
+      acc[label] = (acc[label] ?? 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(counts)
+      .map(([label, count]) => `${count} ${label}`)
+      .join(' · ');
+  }, [orderProposals]);
+
+  const appliedOrderSummary = useMemo(() => {
+    if (lastAppliedItems.length === 0) return [];
+    const counts = lastAppliedItems.reduce<Record<string, number>>((acc, item) => {
+      const label = proposalKindLabel(item.kind);
+      acc[label] = (acc[label] ?? 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(counts).map(([label, count]) => `${count} ${label} update${count === 1 ? '' : 's'}`);
+  }, [lastAppliedItems]);
+
+  const canReadChaos = hasInput && !isAnalyzing;
+  const canReviewSuggestedOrder = orderProposals.length > 0 && !isApplyingOrder;
+
+  const reviewSuggestedOrder = () => {
+    suggestedOrderRef.current?.scrollIntoView({behavior: 'smooth', block: 'start'});
+  };
 
   const syncAnalysis = async () => {
     if (!activeProject) return;
@@ -501,26 +707,49 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
       });
 
       if (result) {
+        const remoteCanvas = result.canvas;
         const remoteArtifacts = Array.isArray(result.artifacts) ? result.artifacts.map((item, index) => normalizeArtifact(item, index)) : [];
+        const nodeArtifacts = remoteCanvas ? canvasArtifacts(remoteCanvas) : [];
         const remoteHints = Array.isArray(result.hints)
           ? result.hints.map((item, index) => normalizeHint(item, index))
           : Array.isArray(result.semantic_hints)
             ? result.semantic_hints.map((item, index) => normalizeHint(item, index))
             : [];
+        const nextProposals = Array.isArray(result.proposals) ? result.proposals : [];
+        if (remoteCanvas) {
+          setCanvas(remoteCanvas);
+          setLastReadText(artifactText);
+          window.requestAnimationFrame(() => fitToContent(remoteCanvas.nodes));
+        }
         setAnalysis({
           summary: result.summary ?? result.message ?? localAnalysis.summary,
-          artifacts: remoteArtifacts.length > 0 ? remoteArtifacts : localAnalysis.artifacts,
+          artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : remoteArtifacts.length > 0 ? remoteArtifacts : localAnalysis.artifacts,
           hints: remoteHints.length > 0 ? remoteHints : localAnalysis.hints,
           capture: result.capture ?? result.review ?? localAnalysis.capture,
         });
-        setAnalysisStatus('Canvas analysis updated.');
+        setOrderProposals(nextProposals);
+        setSelectedProposalIds(new Set(nextProposals.map((proposal) => proposal.id)));
+        setLastAppliedItems([]);
+        const provider = result.extraction_provider ?? String(remoteCanvas?.metadata?.extraction_provider ?? 'unknown');
+        setAnalysisStatus(
+          nextProposals.length > 0
+            ? `Suggested ${nextProposals.length} order update(s). Extractor: ${provider}.`
+            : `Canvas analysis updated. Extractor: ${provider}.`,
+        );
         return;
       }
 
       setAnalysis(localAnalysis);
+      setCanvas(null);
+      setOrderProposals([]);
+      setSelectedProposalIds(new Set());
+      setLastAppliedItems([]);
       setAnalysisStatus('Local analysis refreshed.');
     } catch {
       setAnalysis(localAnalysis);
+      setOrderProposals([]);
+      setSelectedProposalIds(new Set());
+      setLastAppliedItems([]);
       setAnalysisStatus('Local analysis refreshed.');
     } finally {
       setIsAnalyzing(false);
@@ -537,9 +766,22 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         text: artifactText,
         project_id: activeProject.id,
         mode,
+        canvas: canvas ?? undefined,
         artifacts,
       });
       if (result) {
+        if (result.canvas) {
+          setCanvas(result.canvas);
+          window.requestAnimationFrame(() => fitToContent(result.canvas?.nodes ?? []));
+          const nodeArtifacts = canvasArtifacts(result.canvas);
+          setAnalysis((current) => ({
+            ...current,
+            summary: result.summary ?? result.message ?? current.summary,
+            artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : current.artifacts,
+          }));
+          setAnalysisStatus(`Autosort ready for ${mode}.`);
+          return;
+        }
         const remoteArtifacts = Array.isArray(result.artifacts) ? result.artifacts.map((item, index) => normalizeArtifact(item, index)) : [];
         if (remoteArtifacts.length > 0) {
           setAnalysis((current) => ({
@@ -568,7 +810,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const captureReview = async () => {
     if (!activeProject) return;
     setIsCapturing(true);
-    setAnalysisStatus('Capturing review...');
+    setAnalysisStatus('Saving board note...');
     const selectedIds = selectedArtifact ? [selectedArtifact.id] : [];
     const detail = captureNotes.trim() || selectedArtifact?.excerpt || analysis.summary;
 
@@ -599,7 +841,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         ...current,
         capture: captureText,
       }));
-      setAnalysisStatus('Capture saved to the review rail.');
+      setAnalysisStatus('Board note saved to the log.');
     } catch {
       const captureText = `${selectedArtifact ? `${selectedArtifact.title} · ` : ''}${detail}`;
       setCaptures((current) => [
@@ -611,9 +853,46 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         },
         ...current,
       ]);
-      setAnalysisStatus('Capture saved locally.');
+      setAnalysisStatus('Board note saved locally.');
     } finally {
       setIsCapturing(false);
+    }
+  };
+
+  const applyOrderProposals = async () => {
+    if (!activeProject) return;
+    if (orderProposals.length === 0) {
+      await syncAnalysis();
+      return;
+    }
+    if (selectedOrderProposals.length === 0) {
+      setAnalysisStatus('Choose at least one suggested order update.');
+      return;
+    }
+
+    setIsApplyingOrder(true);
+    setAnalysisStatus('Applying selected story updates...');
+    try {
+      const result = await canvasApi.canvasCapture?.(activeProject.id, {
+        proposals: selectedOrderProposals,
+        apply: true,
+      });
+      const appliedItems = result?.items?.length
+        ? result.items
+        : selectedOrderProposals.map((proposal) => ({kind: proposal.kind, target: proposal.target}));
+      const appliedCount = appliedItems.length;
+      setOrderProposals((current) => current.filter((proposal) => !selectedProposalIds.has(proposal.id)));
+      setSelectedProposalIds(new Set());
+      setLastAppliedItems(appliedItems);
+      setAnalysis((current) => ({
+        ...current,
+        capture: `${appliedCount} order update${appliedCount === 1 ? '' : 's'} applied to the project.`,
+      }));
+      setAnalysisStatus(`Applied ${appliedCount} story update${appliedCount === 1 ? '' : 's'}.`);
+    } catch {
+      setAnalysisStatus('Could not apply order updates.');
+    } finally {
+      setIsApplyingOrder(false);
     }
   };
 
@@ -622,12 +901,204 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
       const clip = await navigator.clipboard.readText();
       if (clip.trim()) {
         setArtifactText(clip);
+        setCanvas(null);
+        setLastReadText('');
+        setOrderProposals([]);
+        setSelectedProposalIds(new Set());
+        setLastAppliedItems([]);
         setAnalysisStatus('Clipboard text loaded into the canvas.');
       }
     } catch {
       setAnalysisStatus('Clipboard access was blocked by the browser.');
     }
   };
+
+  const persistCanvas = (nextCanvas: StoryCanvasData) => {
+    if (!activeProject) return;
+    void canvasApi.putCanvas?.(activeProject.id, nextCanvas).catch(() => undefined);
+  };
+
+  const fitToContent = (nodes = canvas?.nodes ?? []) => {
+    const board = boardRef.current;
+    if (!board || nodes.length === 0) return;
+    const padding = 120;
+    const minX = Math.min(...nodes.map((node) => node.x));
+    const minY = Math.min(...nodes.map((node) => node.y));
+    const maxX = Math.max(...nodes.map((node) => node.x + (node.width || 300)));
+    const maxY = Math.max(...nodes.map((node) => node.y + (node.height || 180)));
+    const contentWidth = Math.max(1, maxX - minX + padding * 2);
+    const contentHeight = Math.max(1, maxY - minY + padding * 2);
+    const scale = Math.max(0.55, Math.min(1.2, Math.min(board.clientWidth / contentWidth, board.clientHeight / contentHeight)));
+    setViewport({
+      scale,
+      x: Math.round((board.clientWidth - (maxX + minX) * scale) / 2),
+      y: Math.round((board.clientHeight - (maxY + minY) * scale) / 2),
+    });
+  };
+
+  const deleteNode = (nodeId: string) => {
+    if (!canvas) return;
+    const next = {
+      ...canvas,
+      nodes: canvas.nodes.filter((node) => node.id !== nodeId),
+      edges: canvas.edges.filter((edge) => edge.fromNode !== nodeId && edge.toNode !== nodeId),
+    };
+    setCanvas(next);
+    setSelectedId(null);
+    setContextMenu(null);
+    setAnalysis((current) => ({
+      ...current,
+      artifacts: canvasArtifacts(next),
+      summary: `${next.nodes.length} canvas block(s).`,
+    }));
+    persistCanvas(next);
+  };
+
+  const deleteSelectedNode = () => {
+    if (!selectedId) return;
+    deleteNode(selectedId);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+      if (isEditing || !selectedId || !canvas) return;
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        deleteSelectedNode();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [canvas, selectedId]);
+
+  const updateCanvasNode = (nodeId: string, patch: Partial<CanvasNode>, persist = false) => {
+    setCanvas((current) => {
+      if (!current) return current;
+      const next = {
+        ...current,
+        nodes: current.nodes.map((node) => (node.id === nodeId ? {...node, ...patch, metadata: patch.metadata ?? node.metadata} : node)),
+      };
+      if (persist) persistCanvas(next);
+      setAnalysis((analysisCurrent) => ({...analysisCurrent, artifacts: canvasArtifacts(next)}));
+      return next;
+    });
+  };
+
+  const startNodeDrag = (event: PointerEvent, node: CanvasNode) => {
+    if (event.button === 1) {
+      event.preventDefault();
+      event.stopPropagation();
+      dragRef.current = {kind: 'pan', startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y};
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedId(node.id);
+    const boardX = (event.clientX - viewport.x) / viewport.scale;
+    const boardY = (event.clientY - viewport.y) / viewport.scale;
+    dragRef.current = {kind: 'node', id: node.id, dx: boardX - node.x, dy: boardY - node.y};
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const movePointer = (event: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (drag.kind === 'pan') {
+      setViewport((current) => ({
+        ...current,
+        x: drag.originX + event.clientX - drag.startX,
+        y: drag.originY + event.clientY - drag.startY,
+      }));
+      return;
+    }
+    const x = (event.clientX - viewport.x) / viewport.scale - drag.dx;
+    const y = (event.clientY - viewport.y) / viewport.scale - drag.dy;
+    updateCanvasNode(drag.id, {x: Math.round(x), y: Math.round(y)});
+  };
+
+  const endPointer = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag?.kind === 'node' && canvasRef.current) persistCanvas(canvasRef.current);
+  };
+
+  const startPan = (event: PointerEvent<HTMLDivElement>) => {
+    setContextMenu(null);
+    const target = event.target as HTMLElement;
+    if (event.button !== 1 && (target.closest('[data-canvas-node="true"]') || target.closest('[data-canvas-control="true"]'))) return;
+    dragRef.current = {kind: 'pan', startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y};
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      const nextScale = Math.max(0.55, Math.min(1.8, Number((viewport.scale - event.deltaY * 0.001).toFixed(2))));
+      setViewport((current) => ({...current, scale: nextScale}));
+      return;
+    }
+    event.preventDefault();
+    setViewport((current) => ({
+      ...current,
+      x: current.x - (event.shiftKey ? event.deltaY : event.deltaX),
+      y: current.y - (event.shiftKey ? 0 : event.deltaY),
+    }));
+  };
+
+  const createSticky = () => {
+    const id = `node-${Date.now()}`;
+    const node: CanvasNode = {
+      id,
+      type: 'sticky',
+      x: Math.round((220 - viewport.x) / viewport.scale),
+      y: Math.round((180 - viewport.y) / viewport.scale),
+      width: 280,
+      height: 170,
+      label: 'New sticky',
+      text: 'Write a story fragment here.',
+      color: '#f8df9f',
+      metadata: {semantic_type: 'Note', tags: ['Note'], confidence: 0.6},
+    };
+    const next = canvas
+      ? {...canvas, nodes: [...canvas.nodes, node]}
+      : {version: 'liteauthor.story-canvas.v1', nodes: [node], edges: [], metadata: {source: 'local-sticky'}};
+    setCanvas(next);
+    setAnalysis((current) => ({...current, artifacts: canvasArtifacts(next), summary: `${next.nodes.length} canvas block(s).`}));
+    setSelectedId(id);
+    persistCanvas(next);
+  };
+
+  const editSelectedCard = () => {
+    if (!selectedId || !canvas) return;
+    const node = canvas.nodes.find((item) => item.id === selectedId);
+    if (!node) return;
+    const nextText = window.prompt('Edit card text', node.text ?? '');
+    if (nextText === null) return;
+    updateCanvasNode(selectedId, {text: nextText}, true);
+  };
+
+  const duplicateNode = (nodeId: string) => {
+    if (!canvas) return;
+    const node = canvas.nodes.find((item) => item.id === nodeId);
+    if (!node) return;
+    const nextNode = {
+      ...node,
+      id: `node-${Date.now()}`,
+      x: node.x + 36,
+      y: node.y + 36,
+      label: `${node.label ?? 'Card'} copy`,
+    };
+    const next = {...canvas, nodes: [...canvas.nodes, nextNode]};
+    setCanvas(next);
+    setSelectedId(nextNode.id);
+    setContextMenu(null);
+    setAnalysis((current) => ({...current, artifacts: canvasArtifacts(next), summary: `${next.nodes.length} canvas block(s).`}));
+    persistCanvas(next);
+  };
+
+  const selectedInsights = selectedCardInsights(selectedArtifact);
 
   if (!activeProject) {
     return (
@@ -673,21 +1144,12 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-              onClick={() => void syncAnalysis()}
-              disabled={isAnalyzing}
-            >
-              <ScanSearch className="w-4 h-4" />
-              {isAnalyzing ? 'Analyzing' : 'Analyze canvas'}
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-sm bg-primary px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:opacity-60"
-              onClick={() => void captureReview()}
-              disabled={isCapturing}
+              className="inline-flex items-center gap-2 rounded-sm bg-primary px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={reviewSuggestedOrder}
+              disabled={!canReviewSuggestedOrder}
             >
               <CheckCircle2 className="w-4 h-4" />
-              {isCapturing ? 'Capturing' : 'Capture review'}
+              {orderProposals.length > 0 ? 'Review Suggested Order' : 'Distill into Order'}
             </button>
           </div>
         </div>
@@ -699,24 +1161,46 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
             <section className="space-y-4 rounded-sm border border-oak-variant bg-parchment-bright p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Paste artifact text</p>
-                  <h2 className="mt-1 text-lg font-serif italic text-primary">Feed the board</h2>
+                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Input</p>
+                  <h2 className="mt-1 text-lg font-serif italic text-primary">Paste or drop notes</h2>
                 </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-                  onClick={() => void pasteClipboard()}
-                >
-                  <ClipboardPaste className="w-4 h-4" />
-                  Paste
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                    onClick={() => void pasteClipboard()}
+                  >
+                    <ClipboardPaste className="w-4 h-4" />
+                    Paste
+                  </button>
+                  <button
+                    type="button"
+                    className={`inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-[10px] font-sans uppercase tracking-widest ${
+                      hasUnreadInput || !canvas?.nodes?.length
+                        ? 'border-primary bg-primary text-parchment hover:bg-amber-wax'
+                        : 'border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    onClick={() => void syncAnalysis()}
+                    disabled={!canReadChaos}
+                  >
+                    <ScanSearch className="w-4 h-4" />
+                    {isAnalyzing ? 'Reading' : canvas?.nodes?.length && !hasUnreadInput ? 'Re-read' : 'Read Chaos'}
+                  </button>
+                </div>
               </div>
 
               <textarea
                 className="min-h-[280px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
-                placeholder="Paste a beat sheet, scene packet, a cluster of notes, or raw artifact text here."
+                placeholder="Feed the board with messy notes, fragments, outlines, or scenes."
                 value={artifactText}
-                onChange={(e) => setArtifactText(e.target.value)}
+                onChange={(e) => {
+                  setArtifactText(e.target.value);
+                  setCanvas(null);
+                  setLastReadText('');
+                  setOrderProposals([]);
+                  setSelectedProposalIds(new Set());
+                  setLastAppliedItems([]);
+                }}
               />
 
               <div className="flex flex-wrap gap-2">
@@ -738,6 +1222,11 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                   className="inline-flex items-center gap-2 rounded-full border border-oak-variant bg-sepia-high px-3 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
                   onClick={() => {
                     setArtifactText('');
+                    setCanvas(null);
+                    setLastReadText('');
+                    setOrderProposals([]);
+                    setSelectedProposalIds(new Set());
+                    setLastAppliedItems([]);
                     setAnalysisStatus('Canvas cleared.');
                   }}
                 >
@@ -750,7 +1239,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
             <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
               <div className="flex items-center gap-2">
                 <WandSparkles className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Canvas read</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Read status</h3>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-ink-muted">{analysis.summary}</p>
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
@@ -764,6 +1253,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                 </div>
               </div>
               <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-ink-muted">{keywordLine}</p>
+              <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-primary">{orderProposalSummary}</p>
               <p className="mt-2 text-[11px] text-ink-muted">{analysisStatus}</p>
             </section>
 
@@ -771,13 +1261,13 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Clock3 className="w-4 h-4 text-oak" />
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Capture note</h3>
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Note</h3>
                 </div>
-                <span className="text-[10px] uppercase tracking-widest text-ink-muted">Review rail</span>
+                <span className="text-[10px] uppercase tracking-widest text-ink-muted">Private</span>
               </div>
               <textarea
                 className="mt-3 min-h-[120px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
-                placeholder="Write the review angle, the continuity warning, or the next editorial action."
+                placeholder="Write a private review note before you apply story updates."
                 value={captureNotes}
                 onChange={(e) => setCaptureNotes(e.target.value)}
               />
@@ -789,8 +1279,8 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
           <div className="border-b border-oak-variant bg-parchment/70 px-5 py-4 md:px-8">
             <div className="flex flex-wrap items-center gap-3 justify-between">
               <div>
-                <p className="text-[10px] font-sans uppercase tracking-[0.28em] text-ink-muted">Semantic surface</p>
-                <p className="mt-1 text-sm text-ink-muted">{analysis.capture ?? 'Capture review becomes richer after you select a card and add a note.'}</p>
+                <p className="text-[10px] font-sans uppercase tracking-[0.28em] text-ink-muted">Board</p>
+                <p className="mt-1 text-sm text-ink-muted">{analysis.capture ?? 'Paste messy material, read the chaos, then review what belongs in canon, timeline, or manuscript.'}</p>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-oak-variant bg-sepia-low px-3 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted">
                 <TriangleAlert className="w-3.5 h-3.5" />
@@ -799,21 +1289,86 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
             </div>
           </div>
 
-          <div className="relative min-h-[calc(100vh-208px)] p-5 md:p-8">
-            <div className="pointer-events-none absolute inset-0 overflow-hidden">
-              {analysis.hints.map((hint) => (
-                <div
-                  key={hint.id}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-3 py-1.5 shadow-sm backdrop-blur ${toneClasses(hint.tone)}`}
-                  style={{left: `${hint.x}%`, top: `${hint.y}%`}}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-sans uppercase tracking-widest">{hint.label}</span>
-                  </div>
-                  <div className="mt-0.5 max-w-[12rem] text-[11px] leading-tight opacity-80">{hint.detail}</div>
-                </div>
-              ))}
+          <div
+            ref={boardRef}
+            className="relative min-h-[calc(100vh-208px)] cursor-grab overflow-hidden p-5 md:p-8"
+            onPointerDown={startPan}
+            onPointerMove={movePointer}
+            onPointerUp={endPointer}
+            onPointerCancel={endPointer}
+            onWheel={handleWheel}
+          >
+            <div data-canvas-control="true" className="absolute right-5 top-5 z-30 flex flex-wrap items-center gap-2 rounded-sm border border-oak-variant bg-parchment-bright/95 p-2 shadow-sm">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => setViewport((current) => ({...current, scale: Math.max(0.55, Number((current.scale - 0.1).toFixed(2)))}))}
+                title="Zoom out"
+              >
+                <Minus className="h-4 w-4" />
+                Zoom
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => setViewport((current) => ({...current, scale: Math.min(1.8, Number((current.scale + 0.1).toFixed(2)))}))}
+                title="Zoom in"
+              >
+                <Plus className="h-4 w-4" />
+                Zoom
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => fitToContent()}
+                title="Fit to content"
+              >
+                <Maximize2 className="h-4 w-4" />
+                Fit
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => setViewport({x: 0, y: 0, scale: 1})}
+                title="Reset view"
+              >
+                <Home className="h-4 w-4" />
+                Reset
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                title="Drag empty board or middle mouse to pan"
+              >
+                <Move className="h-4 w-4" />
+                Pan
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-primary bg-primary px-2.5 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax"
+                onClick={createSticky}
+                title="New card"
+              >
+                <StickyNote className="h-4 w-4" />
+                New Card
+              </button>
             </div>
+            {!canvas?.nodes?.length && analysis.hints.length > 0 ? (
+              <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                {analysis.hints.map((hint) => (
+                  <div
+                    key={hint.id}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-3 py-1.5 shadow-sm backdrop-blur ${toneClasses(hint.tone)}`}
+                    style={{left: `${hint.x}%`, top: `${hint.y}%`}}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-sans uppercase tracking-widest">{hint.label}</span>
+                    </div>
+                    <div className="mt-0.5 max-w-[12rem] text-[11px] leading-tight opacity-80">{hint.detail}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {artifacts.length === 0 ? (
               <div className="relative z-10 flex min-h-[60vh] items-center justify-center rounded-sm border border-dashed border-oak-variant bg-parchment-bright/60 p-8 text-center">
@@ -821,12 +1376,98 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-oak-variant bg-sepia-low">
                     <ScanSearch className="w-6 h-6 text-primary" />
                   </div>
-                  <h2 className="mt-4 text-2xl font-serif italic text-primary">Paste your artifact text</h2>
+                  <h2 className="mt-4 text-2xl font-serif italic text-primary">Paste messy story material</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                    The canvas will split the paste into cards, infer the signal in each block, float semantic hints across the board, and
-                    prepare the capture rail for review.
+                    Drop notes, fragments, outlines, or scenes here. LiteAuthor will split them into cards and suggest what belongs in your
+                    canon, timeline, or manuscript.
                   </p>
                 </div>
+              </div>
+            ) : canvas?.nodes?.length ? (
+              <div
+                className="absolute left-0 top-0 z-10 h-[1400px] w-[2200px] origin-top-left"
+                style={{transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`}}
+              >
+                <div
+                  className="absolute inset-0 opacity-50"
+                  style={{
+                    backgroundImage: 'radial-gradient(circle, rgba(80, 61, 44, 0.18) 1px, transparent 1px)',
+                    backgroundSize: '28px 28px',
+                  }}
+                />
+                <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                  {canvas.edges.map((edge) => {
+                    const from = canvas.nodes.find((node) => node.id === edge.fromNode);
+                    const to = canvas.nodes.find((node) => node.id === edge.toNode);
+                    if (!from || !to) return null;
+                    const x1 = from.x + from.width;
+                    const y1 = from.y + from.height / 2;
+                    const x2 = to.x;
+                    const y2 = to.y + to.height / 2;
+                    const mid = Math.max(40, Math.abs(x2 - x1) / 2);
+                    return (
+                      <g key={edge.id}>
+                        <path
+                          d={`M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`}
+                          fill="none"
+                          stroke="rgba(117, 92, 63, 0.48)"
+                          strokeWidth="2"
+                        />
+                        {edge.label ? (
+                          <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 8} className="fill-ink-muted text-[11px] uppercase tracking-widest">
+                            {edge.label}
+                          </text>
+                        ) : null}
+                      </g>
+                    );
+                  })}
+                </svg>
+                {canvas.nodes.map((node, index) => {
+                  const semanticType = String(node.metadata?.semantic_type ?? node.type);
+                  const selected = node.id === selectedId;
+                  const artifact = artifactFromNode(node, index);
+                  return (
+                    <article
+                      key={node.id}
+                      data-canvas-node="true"
+                      className={`absolute cursor-move rounded-sm border p-4 text-left shadow-sm transition-shadow ${
+                        selected ? 'border-primary bg-parchment-bright shadow-md' : 'border-oak-variant bg-parchment-bright/95 hover:border-primary/45'
+                      }`}
+                      style={{
+                        left: node.x,
+                        top: node.y,
+                        width: node.width,
+                        minHeight: node.height,
+                        borderTopColor: node.color ?? undefined,
+                        borderTopWidth: 5,
+                      }}
+                      onPointerDown={(event) => startNodeDrag(event, node)}
+                      onClick={() => setSelectedId(node.id)}
+                      onDoubleClick={editSelectedCard}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setSelectedId(node.id);
+                        setContextMenu({nodeId: node.id, x: event.clientX, y: event.clientY});
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-sans uppercase tracking-widest ${kindClasses(artifact.kind)}`}>
+                          {semanticType === 'Artifact' ? 'Source' : semanticType}
+                        </div>
+                        {semanticType !== 'Artifact' ? <Link2 className="mt-1 h-3.5 w-3.5 text-ink-muted" /> : null}
+                      </div>
+                      <h3 className="mt-3 text-lg font-serif font-semibold leading-tight text-ink">{node.label}</h3>
+                      <p className="mt-3 line-clamp-6 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{node.text}</p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {artifact.tags.slice(0, 3).map((tag) => (
+                          <span key={tag} className="rounded-full border border-oak-variant bg-sepia-low px-2 py-0.5 text-[10px] uppercase tracking-widest text-ink-muted">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <div className="relative z-10 grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
@@ -877,6 +1518,39 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                 })}
               </div>
             )}
+
+            {contextMenu ? (
+              <div
+                data-canvas-control="true"
+                className="fixed z-50 w-44 rounded-sm border border-oak-variant bg-parchment-bright p-1 shadow-lg"
+                style={{left: contextMenu.x, top: contextMenu.y}}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-xs text-ink-muted hover:bg-sepia-low hover:text-primary"
+                  onClick={editSelectedCard}
+                >
+                  <Move className="h-4 w-4" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-xs text-ink-muted hover:bg-sepia-low hover:text-primary"
+                  onClick={() => duplicateNode(contextMenu.nodeId)}
+                >
+                  <StickyNote className="h-4 w-4" />
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-xs font-semibold text-red-700 hover:bg-red-500/10"
+                  onClick={() => deleteNode(contextMenu.nodeId)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -895,7 +1569,31 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
               {selectedArtifact ? (
                 <div className="mt-4 space-y-4">
+                  {canvas?.nodes?.length ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                        onClick={editSelectedCard}
+                      >
+                        <Move className="h-4 w-4" />
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center gap-2 rounded-sm border border-red-500/45 bg-red-50 px-3 py-2 text-[10px] font-sans font-bold uppercase tracking-widest text-red-700 hover:border-red-600 hover:bg-red-100"
+                        onClick={deleteSelectedNode}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
                   <p className="text-sm leading-relaxed text-ink-muted">{selectedArtifact.excerpt}</p>
+                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Detected role</div>
+                    <div className="mt-1 text-sm font-semibold text-primary">{selectedInsights.role}</div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
                       <div className="text-[10px] uppercase tracking-widest text-ink-muted">Kind</div>
@@ -920,40 +1618,201 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                       )}
                     </div>
                   </div>
+                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Extracted notes</div>
+                    <ul className="mt-2 space-y-2 text-sm leading-relaxed text-ink-muted">
+                      {selectedInsights.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Suggested Order</div>
+                    <div className="mt-2 space-y-2">
+                      {selectedInsights.suggestions.map((suggestion) => (
+                        <label key={suggestion} className="flex items-center gap-2 text-sm text-ink-muted">
+                          <input type="checkbox" className="h-4 w-4 accent-primary" defaultChecked={suggestion !== 'Find contradiction'} />
+                          <span>{suggestion}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <p className="mt-4 text-sm leading-relaxed text-ink-muted">Select a card to inspect its signal, tags, and review status.</p>
               )}
             </section>
 
+            <section ref={suggestedOrderRef} className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Suggested Order</p>
+                  <h3 className="mt-1 text-lg font-serif italic text-primary">
+                    {orderProposals.length > 0
+                      ? `${orderProposals.length} suggestion${orderProposals.length === 1 ? '' : 's'} found`
+                      : lastAppliedItems.length > 0
+                        ? 'Order updated'
+                        : hasInput
+                          ? 'Ready to read'
+                          : 'No suggestions yet'}
+                  </h3>
+                </div>
+                <Sparkles className="h-4 w-4 text-primary" />
+              </div>
+
+              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
+                {orderProposals.length > 0
+                  ? 'Review what should become canon, timeline, or manuscript structure before applying it.'
+                  : lastAppliedItems.length > 0
+                    ? 'Added selected updates to the story memory. You can keep shaping the board or move into the updated workspaces.'
+                    : 'Read Chaos to surface canon, timeline, and manuscript suggestions from the board.'}
+              </p>
+
+              {orderProposals.length > 0 ? (
+                <>
+                  <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {orderProposals.map((proposal) => {
+                      const selected = selectedProposalIds.has(proposal.id);
+                      return (
+                        <label
+                          key={proposal.id}
+                          className={`block cursor-pointer rounded-sm border p-3 transition-colors ${
+                            selected ? 'border-primary/45 bg-sepia-highest' : 'border-oak-variant bg-sepia-low hover:border-primary/40'
+                          }`}
+                        >
+                          <span className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 accent-primary"
+                              checked={selected}
+                              onChange={(event) => {
+                                setSelectedProposalIds((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) next.add(proposal.id);
+                                  else next.delete(proposal.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="min-w-0">
+                              <span className="block font-sans text-[10px] font-bold uppercase tracking-widest text-primary">
+                                {proposalKindLabel(proposal.kind)}
+                              </span>
+                              <span className="mt-1 block text-sm font-semibold leading-snug text-ink">{proposal.title}</span>
+                              <span className="mt-1 block break-all font-mono text-[10px] text-ink-muted">{proposal.target}</span>
+                              <span className="mt-2 line-clamp-3 block text-xs leading-relaxed text-ink-muted">{proposalPreview(proposal.content)}</span>
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      className="flex-1 rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                      onClick={() => setSelectedProposalIds(new Set(orderProposals.map((proposal) => proposal.id)))}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className="flex-1 rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                      onClick={() => setSelectedProposalIds(new Set())}
+                    >
+                      None
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {orderProposals.length === 0 && lastAppliedItems.length > 0 ? (
+                <div className="mt-4 rounded-sm border border-oak-variant bg-sepia-low p-3">
+                  <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Added</p>
+                  <ul className="mt-2 space-y-1 text-sm text-ink-muted">
+                    {appliedOrderSummary.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                  <div className="mt-4 grid gap-2">
+                    <button
+                      type="button"
+                      className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
+                      onClick={() => onNavigate('TimelineView', 'push')}
+                    >
+                      Open Timeline
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
+                      onClick={() => onNavigate('StoryBible', 'push')}
+                    >
+                      Open Story Bible
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-sm bg-primary px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-parchment hover:bg-amber-wax"
+                      onClick={() => onNavigate('ZenEditor', 'push')}
+                    >
+                      Continue Writing
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2.5 text-xs font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void (orderProposals.length > 0 ? applyOrderProposals() : syncAnalysis())}
+                disabled={isAnalyzing || isApplyingOrder || (!hasInput && orderProposals.length === 0) || (orderProposals.length > 0 && selectedOrderProposals.length === 0)}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {isApplyingOrder ? 'Applying' : orderProposals.length > 0 ? `Apply ${selectedOrderProposals.length} update${selectedOrderProposals.length === 1 ? '' : 's'}` : 'Read Chaos'}
+              </button>
+            </section>
+
             <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Capture review</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Save board note</h3>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                Review captures can preserve the board state, the selected card, and the note you wrote before you move on.
+                Preserve the board state, selected card, and private note without applying canon or timeline updates.
               </p>
               <button
                 type="button"
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2.5 text-xs font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:opacity-60"
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-4 py-2.5 text-xs font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => void captureReview()}
                 disabled={isCapturing}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                {isCapturing ? 'Capturing' : 'Capture review'}
+                {isCapturing ? 'Saving' : 'Save board note'}
               </button>
             </section>
 
             <section className="flex-1 rounded-sm border border-oak-variant bg-parchment-bright p-4">
               <div className="flex items-center gap-2">
                 <TriangleAlert className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Capture log</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Apply log</h3>
               </div>
               <div className="mt-4 space-y-3">
-                {captures.length === 0 ? (
+                {lastAppliedItems.length > 0 ? (
+                  <article className="rounded-sm border border-primary/35 bg-sepia-highest p-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <h4 className="text-sm font-semibold text-primary">Latest story update</h4>
+                      <span className="text-[10px] uppercase tracking-widest text-ink-muted">Applied</span>
+                    </div>
+                    <ul className="mt-2 space-y-1 text-sm text-ink-muted">
+                      {appliedOrderSummary.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+                {captures.length === 0 && lastAppliedItems.length === 0 ? (
                   <div className="rounded-sm border border-dashed border-oak-variant bg-sepia-low p-4 text-sm text-ink-muted">
-                    No captures yet. Use the review button after you select a card.
+                    No applied updates or board notes yet.
                   </div>
                 ) : (
                   captures.map((entry) => (
