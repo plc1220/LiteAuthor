@@ -7,6 +7,7 @@ from liteauthor_agent.prompt_templates.zen import zen_system_prompt
 from liteauthor_agent.schemas.context import SceneExcerpt
 
 from ..database import connect_project_db, get_project_root
+from ..observability import observe
 from ..schemas import AutocompleteRequest, ZenAIRequest
 
 router = APIRouter(prefix="/api/projects/{project_id}/ai", tags=["ai"])
@@ -67,13 +68,14 @@ async def zen_ai(project_id: str, body: ZenAIRequest):
     system = zen_system_prompt(body.role)
     user = packet["markdown"]
     try:
-        text = await chat_completion(
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            max_tokens=2048,
-        )
+        with observe("model.ai.zen"):
+            text = await chat_completion(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                max_tokens=2048,
+            )
     except Exception as e:
         raise HTTPException(502, f"Model error: {e!s}") from e
     return {
@@ -93,7 +95,8 @@ async def autocomplete_ai(project_id: str, body: AutocompleteRequest):
     if len(body.before.strip()) < 5:
         return {"text": ""}
     try:
-        text = await inline_completion(_autocomplete_prompt(body), max_tokens=24)
+        with observe("model.ai.autocomplete"):
+            text = await inline_completion(_autocomplete_prompt(body), max_tokens=24)
     except Exception as e:
         raise HTTPException(502, f"Model error: {e!s}") from e
     return {"text": _clean_inline_completion(text)}

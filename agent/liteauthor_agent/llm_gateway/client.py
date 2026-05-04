@@ -22,6 +22,11 @@ def chat_completion_sync(messages: list[dict[str, str]], max_tokens: int = 2048)
 
         return chat_completion_mlx_sync(messages, max_tokens=max_tokens)
 
+    if LLM_PROVIDER == "google_genai":
+        from liteauthor_agent.llm_gateway import google_genai_client
+
+        return google_genai_client.chat_completion_sync(messages, max_tokens=max_tokens)
+
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(messages, max_tokens)
     with httpx.Client(timeout=120.0) as client:
@@ -41,6 +46,11 @@ async def chat_completion(messages: list[dict[str, str]], max_tokens: int = 2048
 
         return await asyncio.to_thread(chat_completion_mlx_sync, messages, max_tokens)
 
+    if LLM_PROVIDER == "google_genai":
+        from liteauthor_agent.llm_gateway import google_genai_client
+
+        return await google_genai_client.chat_completion(messages, max_tokens=max_tokens)
+
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(messages, max_tokens)
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -59,6 +69,11 @@ async def inline_completion(prompt: str, max_tokens: int = 24) -> str:
         from liteauthor_agent.llm_gateway.mlx_client import inline_completion_mlx_sync
 
         return await asyncio.to_thread(inline_completion_mlx_sync, prompt, max_tokens)
+
+    if LLM_PROVIDER == "google_genai":
+        from liteauthor_agent.llm_gateway import google_genai_client
+
+        return await google_genai_client.inline_completion(prompt, max_tokens=max_tokens)
 
     url = OPENAI_BASE_URL.rstrip("/") + "/chat/completions"
     payload = _payload(

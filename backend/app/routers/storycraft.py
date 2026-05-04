@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -12,11 +13,15 @@ from liteauthor_agent.storycraft.prompts import format_active_rules_block, story
 from liteauthor_agent.utils.paths import read_file_safe
 
 from ..database import connect_project_db, get_project_root
+from ..observability import observe
 from ..schemas import StorycraftAnalyzeOut, StorycraftRequest, StorycraftRewriteOut, StorycraftRuleOut
 
 router = APIRouter(prefix="/api/projects/{project_id}/storycraft", tags=["storycraft"])
 
-_BUILTIN_SKILLS = Path(__file__).resolve().parent.parent / "builtin-skills"
+logger = logging.getLogger("uvicorn.error")
+
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_BUILTIN_SKILLS = _BACKEND_DIR / "builtin-skills"
 _RULES_CACHE: list | None = None
 
 
@@ -24,6 +29,7 @@ def _all_rules():
     global _RULES_CACHE
     if _RULES_CACHE is None:
         _RULES_CACHE = load_rules(_BUILTIN_SKILLS)
+        logger.info("Loaded %s storycraft rules from %s", len(_RULES_CACHE), _BUILTIN_SKILLS)
     return _RULES_CACHE
 
 
@@ -96,6 +102,16 @@ def storycraft_analyze(project_id: str, body: StorycraftRequest) -> StorycraftAn
     root = Path(get_project_root(project_id))
     rules = _all_rules()
     result = _run_select(root, body, rules)
+    logger.info(
+        "Storycraft analyze project=%s scene=%s intent=%s surface=%s selection_chars=%s rules=%s warnings=%s",
+        project_id,
+        body.scene_id,
+        body.intent,
+        body.surface,
+        len(body.selection or ""),
+        [r.id for r in result.rules],
+        result.warnings,
+    )
     d = result.diagnostics.model_dump()
     return StorycraftAnalyzeOut(
         diagnosis=result.diagnosis,
@@ -113,6 +129,17 @@ async def storycraft_rewrite(project_id: str, body: StorycraftRequest) -> Storyc
         raise HTTPException(404, "Scene not found")
     rules = _all_rules()
     result = _run_select(root, body, rules)
+    logger.info(
+        "Storycraft rewrite selected project=%s scene=%s intent=%s surface=%s run_model=%s selection_chars=%s rules=%s warnings=%s",
+        project_id,
+        body.scene_id,
+        body.intent,
+        body.surface,
+        body.run_model,
+        len(body.selection or ""),
+        [r.id for r in result.rules],
+        result.warnings,
+    )
     task = _INTENT_TASK.get(body.intent, _INTENT_TASK["rewrite_with_intent"])
     rules_block = [format_active_rules_block(result.rules)]
     instruction = (
@@ -129,6 +156,14 @@ async def storycraft_rewrite(project_id: str, body: StorycraftRequest) -> Storyc
         active_storycraft_rules=rules_block,
     )
     if not body.run_model or not (body.selection or "").strip():
+        logger.info(
+            "Storycraft rewrite skipped model project=%s scene=%s intent=%s approx_tokens=%s chunks_used=%s",
+            project_id,
+            body.scene_id,
+            body.intent,
+            packet["approx_tokens"],
+            packet["chunks_used"],
+        )
         return StorycraftRewriteOut(
             diagnosis=result.diagnosis,
             rules=_out_rules(result.rules),
@@ -139,15 +174,37 @@ async def storycraft_rewrite(project_id: str, body: StorycraftRequest) -> Storyc
         )
     system = storycraft_system_prompt("literary_editor")
     try:
-        text = await chat_completion(
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": packet["markdown"]},
-            ],
-            max_tokens=2048,
+        logger.info(
+            "Storycraft rewrite calling model project=%s scene=%s intent=%s approx_tokens=%s chunks_used=%s",
+            project_id,
+            body.scene_id,
+            body.intent,
+            packet["approx_tokens"],
+            packet["chunks_used"],
         )
+        with observe(f"model.storycraft.{body.intent}"):
+            text = await chat_completion(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": packet["markdown"]},
+                ],
+                max_tokens=2048,
+            )
     except Exception as e:
+        logger.exception(
+            "Storycraft rewrite model failed project=%s scene=%s intent=%s",
+            project_id,
+            body.scene_id,
+            body.intent,
+        )
         raise HTTPException(502, f"Model error: {e!s}") from e
+    logger.info(
+        "Storycraft rewrite completed project=%s scene=%s intent=%s output_chars=%s",
+        project_id,
+        body.scene_id,
+        body.intent,
+        len(text or ""),
+    )
     return StorycraftRewriteOut(
         diagnosis=result.diagnosis,
         rules=_out_rules(result.rules),

@@ -15,6 +15,9 @@ mlx = [
   "mlx-lm>=0.30.7",
   "mlx-vlm>=0.4.3",
 ]
+gemini = [
+  "google-genai>=1.0.0",
+]
 all = [
   "mlx-lm>=0.30.7",
   "mlx-vlm>=0.4.3",
