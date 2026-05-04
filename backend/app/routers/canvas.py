@@ -443,7 +443,10 @@ def _proposals_for_node(node: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    if "Manuscript Part" in (meta.get("tags") or []):
+    # Scene (and explicit manuscript sections) can be applied into the manuscript DB + files.
+    # Previously only "Manuscript Part" tagged chunks got a chapter proposal, so normal Scene
+    # cards never offered a path into ZenEditor/manuscript despite the UI showing "scene".
+    if kind == "Scene" or "Manuscript Part" in (meta.get("tags") or []):
         proposals.append(
             {
                 "id": f"proposal-chapter-{node_id}",
@@ -672,7 +675,7 @@ async def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
         "artifacts": artifacts,
         "hints": _ui_hints(canvas),
         "summary": f"{len(artifacts)} cards · {len(proposals)} capture proposals · extractor: {extraction_provider}",
-        "capture": "Review the extracted cards, then capture selected material into wiki, timeline, or manuscript structure.",
+        "capture": "Review cards on the board. In Updates, select proposals then Apply — Scene cards can add a manuscript chapter; other kinds update bible or timeline.",
         "extraction_provider": extraction_provider,
     }
 

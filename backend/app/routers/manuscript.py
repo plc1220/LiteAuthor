@@ -44,7 +44,12 @@ def outline(project_id: str):
     try:
         ch_rows = conn.execute("SELECT id, sort_order, title, slug FROM chapters ORDER BY sort_order, title").fetchall()
         sc_rows = conn.execute(
-            "SELECT id, chapter_id, sort_order, title, slug, file_rel_path FROM scenes ORDER BY chapter_id, sort_order, title"
+            """
+            SELECT s.id, s.chapter_id, s.sort_order, s.title, s.slug, s.file_rel_path
+            FROM scenes s
+            JOIN chapters c ON c.id = s.chapter_id
+            ORDER BY c.sort_order, c.title, s.sort_order, s.title
+            """
         ).fetchall()
         return OutlineOut(
             chapters=[ChapterOut(**dict(r)) for r in ch_rows],
