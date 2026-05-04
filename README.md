@@ -67,6 +67,8 @@ bash backend/start.sh
 
 The startup script uses `backend/.venv`, installs missing dependencies, and ensures the in-process MLX packages are present.
 
+Optional: copy [`backend/.env.example`](backend/.env.example) to **`backend/.env`** (gitignored) for local API keys and LLM settings; the app loads `backend/.env` on startup.
+
 If you prefer to run the server directly after `backend/.venv` exists:
 
 ```bash
@@ -160,6 +162,24 @@ export OPENAI_BASE_URL=http://127.0.0.1:8080/v1
 export OPENAI_MODEL=default
 ```
 
+To use **Google Gemini + Gemma** (e.g. fast autocomplete on Flash Lite, writer flows on Gemma), install the Gemini extra and set the provider:
+
+```bash
+pip install -e './agent[gemini]'
+export LITEAUTHOR_LLM_PROVIDER=google_genai
+export GEMINI_API_KEY='paste-your-key-here'
+```
+
+Set `GEMINI_API_KEY` to a **Gemini API key** string (same as in Google AI Studio, or from Google Cloud Console under **APIs and Services → Credentials → Create credentials → API key**). That value is what `genai.Client(api_key=...)` expects; it is not a Secret Manager resource name.
+
+If you store the key in **Secret Manager**, use the secret id you created (not a placeholder), for example:
+
+```bash
+export GEMINI_API_KEY="$(gcloud secrets versions access latest --secret=gemini-api-key)"
+```
+
+Defaults: `GEMINI_AUTOCOMPLETE_MODEL=gemini-3.1-flash-lite-preview`, `GEMINI_CHAT_MODEL=gemma-4-26b-a4b-it`. Optional: `GEMINI_CHAT_THINKING_LEVEL=HIGH`, `GEMINI_CHAT_ENABLE_GOOGLE_SEARCH=true`.
+
 Optional: `LITEAUTHOR_MAX_CONTEXT_CHARS` (default `12000`) for scene packet size. See [`.env.example`](.env.example).
 
 ## Optional desktop shell (Tauri)
@@ -172,7 +192,7 @@ Not bundled in-repo. A future Tauri shell can wrap `frontend/dist` and ship alon
 agent/liteauthor_agent/
   agents/              # Role-specific prompt fragments
   context_engine/      # Scene packet / retrieval assembly
-  llm_gateway/         # In-process MLX and optional OpenAI-compatible HTTP client
+  llm_gateway/         # MLX, OpenAI-compatible HTTP, or optional Google GenAI (split models)
   orchestrator/        # Multi-step jobs (e.g. sample continuity pipeline)
   prompt_templates/    # System / instruction strings
   routers/             # Reserved for a standalone agent ASGI service

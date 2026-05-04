@@ -12,6 +12,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+if [ -f ".env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source ".env"
+  set +a
+fi
+
 find_python() {
   local candidate
   for candidate in python3.13 python3.12 python3.11 python3; do
@@ -42,12 +49,19 @@ if [ ! -d ".venv" ]; then
 fi
 
 if ! .venv/bin/python - <<'PY' >/dev/null 2>&1
+import os
+
 import liteauthor_agent
-import mlx_lm
-import mlx_vlm
+
+provider = os.environ.get("LITEAUTHOR_LLM_PROVIDER", "google_genai").strip().lower()
+if provider == "google_genai":
+    import google.genai
+elif provider == "mlx":
+    import mlx_lm
+    import mlx_vlm
 PY
 then
-  echo "Installing backend dependencies, including in-process MLX support ..."
+  echo "Installing backend dependencies for ${LITEAUTHOR_LLM_PROVIDER:-google_genai} ..."
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements.txt
 fi
@@ -55,5 +69,8 @@ fi
 # Activate the venv
 source .venv/bin/activate
 
-# Run the backend server
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8787
+# Run the backend server and keep a local dev log for debugging.
+LOG_FILE="${LITEAUTHOR_BACKEND_LOG_FILE:-../backend-dev.log}"
+mkdir -p "$(dirname "${LOG_FILE}")"
+echo "Writing backend log to ${LOG_FILE}"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8787 2>&1 | tee -a "${LOG_FILE}"
