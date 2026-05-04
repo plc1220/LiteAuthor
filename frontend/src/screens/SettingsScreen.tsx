@@ -1,13 +1,15 @@
-import {useMemo, useState} from 'react';
-import {Bot, Database, Eye, FileText, Keyboard, Palette, Save, Settings, ShieldCheck, SlidersHorizontal} from 'lucide-react';
+import {useEffect, useMemo, useState} from 'react';
+import {Activity, Bot, Database, Eye, FileText, Keyboard, Palette, RefreshCcw, Save, Settings, ShieldCheck, SlidersHorizontal, TriangleAlert} from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
+import {api, type MetricStats, type MetricsSnapshot} from '../lib/api';
 
-type Section = 'Editor' | 'AI & Models' | 'Reference Notes' | 'Continuity Engine' | 'Appearance' | 'Keyboard Shortcuts' | 'Data & Storage';
+type Section = 'Editor' | 'AI & Models' | 'Observability' | 'Reference Notes' | 'Continuity Engine' | 'Appearance' | 'Keyboard Shortcuts' | 'Data & Storage';
 
 const sections: {name: Section; icon: typeof SlidersHorizontal}[] = [
   {name: 'Editor', icon: SlidersHorizontal},
   {name: 'AI & Models', icon: Bot},
+  {name: 'Observability', icon: Activity},
   {name: 'Reference Notes', icon: FileText},
   {name: 'Continuity Engine', icon: ShieldCheck},
   {name: 'Appearance', icon: Palette},
@@ -41,6 +43,10 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
   const [autoSelection, setAutoSelection] = useState(false);
   const [povLeakage, setPovLeakage] = useState(true);
   const [setupPayoff, setSetupPayoff] = useState(false);
+  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [metricsError, setMetricsError] = useState('');
+  const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
+  const [autoRefreshMetrics, setAutoRefreshMetrics] = useState(true);
 
   const wikiPath = useMemo(() => {
     if (!activeProject) return '~/Documents/LiteAuthor/[project]/story/';
@@ -67,6 +73,25 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
       <div className="flex items-center justify-start md:justify-end">{children}</div>
     </div>
   );
+
+  const loadMetrics = async () => {
+    try {
+      const next = await api.metrics();
+      setMetrics(next);
+      setMetricsError('');
+      setMetricsUpdatedAt(new Date());
+    } catch (e) {
+      setMetricsError((e as Error).message);
+    }
+  };
+
+  useEffect(() => {
+    if (section !== 'Observability') return;
+    void loadMetrics();
+    if (!autoRefreshMetrics) return;
+    const id = window.setInterval(() => void loadMetrics(), 5000);
+    return () => window.clearInterval(id);
+  }, [section, autoRefreshMetrics]);
 
   const editorSection = (
     <>
@@ -152,6 +177,125 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
     </>
   );
 
+  const formatMs = (value: number) => {
+    if (!Number.isFinite(value)) return '0 ms';
+    if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
+    return `${value.toFixed(value >= 100 ? 0 : 1)} ms`;
+  };
+
+  const formatRate = (value: number) => `${Math.round(value * 100)}%`;
+
+  const metricEntries = useMemo(() => {
+    const entries = Object.entries(metrics?.metrics ?? {});
+    return entries.sort((a, b) => b[1].p99_ms - a[1].p99_ms);
+  }, [metrics]);
+
+  const httpMetrics = metricEntries.filter(([name]) => name.startsWith('http.'));
+  const modelMetrics = metricEntries.filter(([name]) => name.startsWith('model.'));
+  const topMetrics = metricEntries.slice(0, 4);
+
+  const metricHealth = useMemo(() => {
+    if (!metrics) return {label: 'Waiting', tone: 'text-ink-muted', detail: 'No samples loaded yet.'};
+    const hasErrors = metricEntries.some(([, stat]) => stat.errors > 0);
+    if (hasErrors) return {label: 'Errors', tone: 'text-red-700', detail: 'At least one route or model operation has recorded failures.'};
+    return {label: 'Healthy', tone: 'text-emerald-700', detail: 'No errors in the current rolling window.'};
+  }, [metrics, metricEntries]);
+
+  const MetricCard = ({name, stat}: {name: string; stat: MetricStats}) => (
+    <div className="border border-oak-variant bg-parchment-bright p-4 rounded-sm min-w-0">
+      <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted truncate">{name.replace(/^http\./, '').replace(/^model\./, '')}</p>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-2xl font-serif text-primary">{formatMs(stat.p99_ms)}</p>
+          <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">p99 latency</p>
+        </div>
+        <div className={`text-right text-xs ${stat.errors ? 'text-red-700' : 'text-ink-muted'}`}>
+          <p>{stat.count} calls</p>
+          <p>{formatRate(stat.error_rate)} errors</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const MetricTable = ({title, entries}: {title: string; entries: [string, MetricStats][]}) => (
+    <div className="border border-oak-variant bg-sepia-low rounded-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-oak-variant bg-sepia-high flex items-center justify-between">
+        <h3 className="text-sm font-serif text-primary">{title}</h3>
+        <span className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">{entries.length} series</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-[10px] uppercase tracking-widest text-ink-muted font-sans">
+            <tr className="border-b border-oak-variant/60">
+              <th className="text-left font-normal px-4 py-3">Series</th>
+              <th className="text-right font-normal px-3 py-3">Count</th>
+              <th className="text-right font-normal px-3 py-3">Errors</th>
+              <th className="text-right font-normal px-3 py-3">Avg</th>
+              <th className="text-right font-normal px-3 py-3">P95</th>
+              <th className="text-right font-normal px-4 py-3">P99</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.length ? entries.map(([name, stat]) => (
+              <tr key={name} className="border-b border-oak-variant/40 last:border-b-0">
+                <td className="px-4 py-3 font-mono text-xs text-ink max-w-[380px] truncate" title={name}>{name}</td>
+                <td className="px-3 py-3 text-right text-ink-muted">{stat.count}</td>
+                <td className={`px-3 py-3 text-right ${stat.errors ? 'text-red-700' : 'text-ink-muted'}`}>{stat.errors}</td>
+                <td className="px-3 py-3 text-right text-ink-muted">{formatMs(stat.avg_ms)}</td>
+                <td className="px-3 py-3 text-right text-ink-muted">{formatMs(stat.p95_ms)}</td>
+                <td className="px-4 py-3 text-right font-serif text-primary">{formatMs(stat.p99_ms)}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-ink-muted">No samples yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const observabilitySection = (
+    <div className="space-y-6">
+      <div className="border border-oak-variant bg-sepia-high p-5 rounded-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          {metricHealth.label === 'Errors' ? <TriangleAlert className="w-5 h-5 text-red-700 mt-0.5" /> : <Activity className="w-5 h-5 text-primary mt-0.5" />}
+          <div>
+            <p className={`font-serif text-xl ${metricHealth.tone}`}>{metricHealth.label}</p>
+            <p className="text-xs text-ink-muted mt-1">{metricHealth.detail}</p>
+            <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted mt-2">
+              {metricsUpdatedAt ? `Updated ${metricsUpdatedAt.toLocaleTimeString()}` : 'Not refreshed yet'} · rolling window {metrics?.window_samples ?? 0} samples
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-ink-muted">
+            <Toggle checked={autoRefreshMetrics} onChange={setAutoRefreshMetrics} />
+            Auto
+          </label>
+          <button type="button" className="px-3 py-2 border border-oak-variant rounded-sm text-xs uppercase tracking-widest flex items-center gap-2" onClick={() => void loadMetrics()}>
+            <RefreshCcw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {metricsError ? (
+        <div className="border border-red-800/30 bg-red-950/10 text-red-800 p-4 rounded-sm text-sm">{metricsError}</div>
+      ) : null}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        {topMetrics.length ? topMetrics.map(([name, stat]) => <MetricCard key={name} name={name} stat={stat} />) : (
+          <div className="border border-oak-variant bg-parchment-bright p-6 rounded-sm text-sm text-ink-muted md:col-span-2 xl:col-span-4">Run the app or call an API endpoint to populate latency samples.</div>
+        )}
+      </div>
+
+      <MetricTable title="HTTP Routes" entries={httpMetrics} />
+      <MetricTable title="Model Operations" entries={modelMetrics} />
+    </div>
+  );
+
   const placeholderSection = (
     <div className="border border-oak-variant bg-sepia-high p-8 rounded-sm text-sm text-ink-muted">
       <Eye className="w-6 h-6 text-oak mb-3" />
@@ -159,7 +303,7 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
     </div>
   );
 
-  const content = section === 'Editor' ? editorSection : section === 'AI & Models' ? aiSection : section === 'Reference Notes' ? wikiSection : section === 'Continuity Engine' ? continuitySection : placeholderSection;
+  const content = section === 'Editor' ? editorSection : section === 'AI & Models' ? aiSection : section === 'Observability' ? observabilitySection : section === 'Reference Notes' ? wikiSection : section === 'Continuity Engine' ? continuitySection : placeholderSection;
 
   return (
     <div className="flex h-screen bg-parchment text-ink overflow-hidden">

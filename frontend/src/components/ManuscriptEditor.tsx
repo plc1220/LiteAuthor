@@ -7,6 +7,7 @@ import StarterKit from '@tiptap/starter-kit';
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useRef} from 'react';
 import {useState} from 'react';
 import type {RefObject} from 'react';
+import {ChevronDown, Info, MoreHorizontal} from 'lucide-react';
 import {Plugin, PluginKey} from '@tiptap/pm/state';
 import {Decoration, DecorationSet} from '@tiptap/pm/view';
 import type {Node as PMNode} from '@tiptap/pm/model';
@@ -47,7 +48,7 @@ type Props = {
   onEntityClick?: (label: string) => void;
   commands?: CommandPaletteItem[];
   onCommand?: (commandId: CommandId, scope: CommandScope, freeform?: string) => void;
-  onPreviewAction?: (action: 'accept' | 'reject' | 'insert_below') => void;
+  onInlinePreviewAction?: (action: 'apply' | 'dismiss' | 'review' | 'regenerate') => void;
 };
 
 const SAVE_MS = 900;
@@ -83,6 +84,9 @@ export type InlinePreview = {
   original: string;
   proposed: string;
   showInsertBelow?: boolean;
+  status?: 'generating' | 'ready';
+  task?: string;
+  summary?: string;
 };
 
 function nextWordChunk(text: string): string {
@@ -238,10 +242,12 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     onEntityClick,
     commands = [],
     onCommand,
-    onPreviewAction,
+    onInlinePreviewAction,
   },
   ref,
 ) {
+  const [assistantMoreOpen, setAssistantMoreOpen] = useState(false);
+  const [assistantInfoId, setAssistantInfoId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autocompleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ghostText = useRef('');
@@ -250,10 +256,10 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
   memoryTermsRef.current = memoryTerms;
   const onEntityClickRef = useRef(onEntityClick);
   onEntityClickRef.current = onEntityClick;
+  const onInlinePreviewActionRef = useRef(onInlinePreviewAction);
+  onInlinePreviewActionRef.current = onInlinePreviewAction;
   const edRef = useRef<Editor | null>(null);
   const inlinePreview = useRef<InlinePreview | null>(null);
-  const onPreviewActionRef = useRef(onPreviewAction);
-  onPreviewActionRef.current = onPreviewAction;
   const [slashMenu, setSlashMenu] = useState<{
     open: boolean;
     query: string;
@@ -387,7 +393,8 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     content: markdownToTipTapDoc(''),
     editorProps: {
       attributes: {
-        class: 'prose prose-invert max-w-none min-h-[480px] focus:outline-none font-serif text-xl leading-relaxed text-ink px-1 zen-cursor',
+        class:
+          'prose prose-invert max-w-none min-h-[480px] focus:outline-none font-serif text-[17px] leading-[1.78] text-ink font-normal px-1 zen-cursor',
       },
       handleKeyDown: (_view, event) => {
         const ed = edRef.current;
@@ -492,7 +499,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
           props: {
             decorations(state) {
               const preview = inlinePreviewPluginKey.getState(state);
-              if (!preview?.proposed) return DecorationSet.empty;
+              if (!preview || (!preview.proposed && preview.status !== 'generating')) return DecorationSet.empty;
               const decos: Decoration[] = [];
               if (preview.range.from !== preview.range.to) {
                 decos.push(Decoration.inline(preview.range.from, preview.range.to, {class: 'inline-edit-removed'}));
@@ -503,46 +510,65 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
                   () => {
                     const wrap = document.createElement('span');
                     wrap.className = 'inline-edit-widget';
-                    const text = document.createElement('span');
-                    text.className = 'inline-edit-added';
-                    text.textContent = preview.proposed;
-                    wrap.append(text);
-                    const actions = document.createElement('span');
-                    actions.className = 'inline-edit-actions';
-                    const accept = document.createElement('button');
-                    accept.type = 'button';
-                    accept.textContent = 'Accept';
-                    accept.dataset.inlinePreviewAction = 'accept';
-                    actions.append(accept);
-                    if (preview.showInsertBelow) {
-                      const insert = document.createElement('button');
-                      insert.type = 'button';
-                      insert.textContent = 'Insert below';
-                      insert.dataset.inlinePreviewAction = 'insert_below';
-                      actions.append(insert);
+                    const card = document.createElement('span');
+                    card.className = `inline-ai-card ${preview.status === 'generating' ? 'inline-ai-card-generating' : ''}`;
+
+                    const title = document.createElement('span');
+                    title.className = 'inline-ai-title';
+                    title.textContent = preview.status === 'generating' ? `${preview.task ?? 'Working on selection'}...` : (preview.task ?? 'AI suggestion');
+                    card.append(title);
+
+                    if (preview.status === 'generating') {
+                      const steps = ['Reading selection', 'Using scene context', 'Preparing suggestion'];
+                      for (const step of steps) {
+                        const row = document.createElement('span');
+                        row.className = 'inline-ai-step';
+                        row.textContent = step;
+                        card.append(row);
+                      }
+                    } else {
+                      const text = document.createElement('span');
+                      text.className = 'inline-edit-added';
+                      text.textContent = preview.proposed;
+                      card.append(text);
+
+                      if (preview.summary) {
+                        const summary = document.createElement('span');
+                        summary.className = 'inline-ai-summary';
+                        summary.textContent = preview.summary;
+                        card.append(summary);
+                      }
+
+                      const actions = document.createElement('span');
+                      actions.className = 'inline-ai-actions';
+                      const buttons: Array<[string, string]> = [
+                        ['apply', 'Apply'],
+                        ['dismiss', 'Dismiss'],
+                        ['review', 'Review'],
+                        ['regenerate', 'Try again'],
+                      ];
+                      for (const [action, label] of buttons) {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = action === 'apply' ? 'inline-ai-button inline-ai-button-primary' : 'inline-ai-button';
+                        button.textContent = label;
+                        button.addEventListener('mousedown', (event) => event.preventDefault());
+                        button.addEventListener('click', (event) => {
+                          event.preventDefault();
+                          window.dispatchEvent(new CustomEvent('liteauthor:inline-preview-action', {detail: action}));
+                        });
+                        actions.append(button);
+                      }
+                      card.append(actions);
                     }
-                    const reject = document.createElement('button');
-                    reject.type = 'button';
-                    reject.textContent = 'Reject';
-                    reject.dataset.inlinePreviewAction = 'reject';
-                    actions.append(reject);
-                    wrap.append(actions);
+
+                    wrap.append(card);
                     return wrap;
                   },
                   {side: 1},
                 ),
               );
               return DecorationSet.create(state.doc, decos);
-            },
-            handleDOMEvents: {
-              click: (_view, event) => {
-                const action = (event.target as HTMLElement | null)?.closest?.('[data-inline-preview-action]') as HTMLElement | null;
-                const value = action?.dataset.inlinePreviewAction as 'accept' | 'reject' | 'insert_below' | undefined;
-                if (!value) return false;
-                event.preventDefault();
-                onPreviewActionRef.current?.(value);
-                return true;
-              },
             },
           },
         }),
@@ -565,6 +591,8 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
       const {from, to} = ed.state.selection;
       const text = ed.state.doc.textBetween(from, to, '\n');
       onSelectionChange?.({from, to, text});
+      setAssistantMoreOpen(false);
+      setAssistantInfoId(null);
       if (from !== to) {
         setGhostText(ed, '');
         setSlashMenu(null);
@@ -572,7 +600,6 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
         scheduleAutocomplete(ed);
         updateSlashMenu(ed);
       }
-      runTypewriterScroll(ed);
     },
   });
 
@@ -671,6 +698,17 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
   }, [editor, projectId, sceneId, onStats]);
 
   useEffect(() => {
+    const onInlineAction = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail === 'apply' || detail === 'dismiss' || detail === 'review' || detail === 'regenerate') {
+        onInlinePreviewActionRef.current?.(detail);
+      }
+    };
+    window.addEventListener('liteauthor:inline-preview-action', onInlineAction);
+    return () => window.removeEventListener('liteauthor:inline-preview-action', onInlineAction);
+  }, []);
+
+  useEffect(() => {
     if (!editor) return;
     editor.view.dispatch(editor.state.tr.setMeta('entityTermsRefresh', 1));
   }, [editor, memoryTerms]);
@@ -689,44 +727,154 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
   }
 
   const slashMatches = slashMenu?.open ? searchSlashCommands(slashMenu.query) : [];
+  const commandById = (id: CommandId) => commands.find((command) => command.id === id);
+  const primaryAssistantCommands = [commandById('rewrite'), commandById('expand'), commandById('shorten')].filter(Boolean) as CommandPaletteItem[];
+  const insertAssistantCommands = [commandById('finish_sentence'), commandById('describe_setting'), commandById('emotional_beat'), commandById('next_beat')].filter(
+    Boolean,
+  ) as CommandPaletteItem[];
+  const craftAssistantCommands = commands.filter((command) => command.kind === 'storycraft');
+  const moodAssistantCommand = commandById('tone_darker');
+  const runAssistantCommand = (command: CommandPaletteItem) => {
+    setAssistantMoreOpen(false);
+    setAssistantInfoId(null);
+    editor.chain().focus().run();
+    onCommand?.(command.id, buildCommandScope(editor));
+  };
+  const InfoTip = ({id, label, description}: {id: string; label: string; description: string}) => (
+    <span className={`assistant-info ${assistantInfoId === id ? 'assistant-info-open' : ''}`}>
+      <button
+        type="button"
+        className="assistant-info-trigger"
+        onClick={(event) => {
+          event.stopPropagation();
+          setAssistantInfoId((openId) => (openId === id ? null : id));
+        }}
+        aria-label={`${label} info`}
+        title={description}
+      >
+        <Info className="h-3 w-3" />
+      </button>
+      <span className="assistant-info-popover" role="tooltip">
+        {description}
+      </span>
+    </span>
+  );
 
   return (
     <div className="relative w-full min-w-0">
       <BubbleMenu
         editor={editor}
-        tippyOptions={{duration: 150, maxWidth: 'min(100vw, 360px)'}}
+        tippyOptions={{
+          duration: [120, 80],
+          interactive: true,
+          maxWidth: 'min(calc(100vw - 24px), 360px)',
+          placement: 'top',
+          offset: [0, 6],
+          moveTransition: 'transform 120ms ease',
+          popperOptions: {
+            modifiers: [
+              {name: 'flip', options: {fallbackPlacements: ['bottom', 'top']}},
+              {name: 'preventOverflow', options: {boundary: 'viewport', padding: 12}},
+            ],
+          },
+        }}
         shouldShow={({editor: ed}) => {
+          if (!onCommand || commands.length === 0) return false;
           const {from, to} = ed.state.selection;
           return from !== to && to - from < 200_000;
         }}
       >
         <div
-          className="flex items-center gap-0.5 rounded-sm border border-outline-variant bg-surface-container-high px-1 py-0.5 font-sans text-ui-label shadow-sm"
+          className="assistant-bubble relative flex items-center gap-0.5 rounded-md border border-outline-variant/80 bg-parchment-bright/90 px-1 py-1 font-sans text-ui-label shadow-[0_8px_22px_rgba(39,26,18,0.13)] backdrop-blur-md"
           role="toolbar"
-          aria-label="Formatting"
+          aria-label="Writing assistant"
+          onMouseDown={(event) => event.preventDefault()}
         >
-          <button
-            type="button"
-            className={`min-w-8 rounded-sm px-2 py-1 text-xs font-semibold ${
-              editor.isActive('bold') ? 'bg-surface-tint/15 text-on-surface' : 'text-ink-muted hover:text-on-surface'
-            }`}
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            title="Bold (⌘B)"
-          >
-            B
-          </button>
-          <button
-            type="button"
-            className={`min-w-8 rounded-sm px-2 py-1 text-xs italic ${
-              editor.isActive('italic') ? 'bg-surface-tint/15 text-on-surface' : 'text-ink-muted hover:text-on-surface'
-            }`}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            title="Italic (⌘I)"
-          >
-            I
-          </button>
-          <span className="mx-1 w-px self-stretch bg-outline-variant" aria-hidden />
-          <span className="px-1.5 text-[10px] uppercase tracking-widest text-ink-muted">Prose: Newsreader</span>
+          {primaryAssistantCommands.map((command, index) => {
+            const Icon = command.icon;
+            return (
+              <div
+                key={command.id}
+                className={`assistant-bubble-action ${index === 0 ? 'assistant-bubble-primary' : ''}`}
+              >
+                <button type="button" className="assistant-bubble-button" onClick={() => runAssistantCommand(command)} title={command.title}>
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span>{command.label}</span>
+                </button>
+              </div>
+            );
+          })}
+
+          <div className="assistant-bubble-action">
+            <button
+              type="button"
+              className="assistant-bubble-button"
+              onClick={() => setAssistantMoreOpen((open) => !open)}
+              title="More writing actions"
+              aria-expanded={assistantMoreOpen}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
+              <span>More</span>
+              <ChevronDown className={`h-3 w-3 transition-transform ${assistantMoreOpen ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+
+          {assistantMoreOpen ? (
+            <div className="absolute right-0 top-[calc(100%+8px)] z-[90] w-72 overflow-visible rounded-md border border-outline-variant bg-parchment-bright/95 py-1.5 text-ink shadow-[0_14px_34px_rgba(39,26,18,0.16)] backdrop-blur-md">
+              <div className="px-2 pb-1">
+                <div className="grid grid-cols-2 gap-1">
+                  <div className={`assistant-bubble-menu-row ${editor.isActive('bold') ? 'bg-sepia-mid text-primary' : ''}`}>
+                    <button type="button" className="assistant-bubble-menu-button justify-center" onClick={() => editor.chain().focus().toggleBold().run()} title="Bold (Cmd+B)">
+                      <span className="font-bold">B</span>
+                      <span>Bold</span>
+                    </button>
+                    <InfoTip id="format_bold" label="Bold" description="Apply bold formatting to the selected text." />
+                  </div>
+                  <div className={`assistant-bubble-menu-row ${editor.isActive('italic') ? 'bg-sepia-mid text-primary' : ''}`}>
+                    <button type="button" className="assistant-bubble-menu-button justify-center" onClick={() => editor.chain().focus().toggleItalic().run()} title="Italic (Cmd+I)">
+                      <span className="italic">I</span>
+                      <span>Italic</span>
+                    </button>
+                    <InfoTip id="format_italic" label="Italic" description="Apply italic formatting to the selected text." />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-outline-variant/70 px-2 py-1">
+                {[moodAssistantCommand, ...insertAssistantCommands].filter(Boolean).map((command) => {
+                  const item = command as CommandPaletteItem;
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.id} className="assistant-bubble-menu-row">
+                      <button type="button" className="assistant-bubble-menu-button" onClick={() => runAssistantCommand(item)} title={item.title}>
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        <span>{item.label}</span>
+                      </button>
+                      <InfoTip id={item.id} label={item.label} description={item.title} />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {craftAssistantCommands.length ? (
+                <div className="border-t border-outline-variant/70 px-2 pt-1">
+                  <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest text-ink-muted">Craft</div>
+                  {craftAssistantCommands.map((command) => {
+                    const Icon = command.icon;
+                    return (
+                      <div key={command.id} className="assistant-bubble-menu-row">
+                        <button type="button" className="assistant-bubble-menu-button" onClick={() => runAssistantCommand(command)} title={command.title}>
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{command.label}</span>
+                        </button>
+                        <InfoTip id={command.id} label={command.label} description={command.title} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </BubbleMenu>
       <EditorContent editor={editor} />

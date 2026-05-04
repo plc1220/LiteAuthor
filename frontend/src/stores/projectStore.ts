@@ -3,6 +3,22 @@ import {api, type Chapter, type Project, type Scene} from '../lib/api';
 
 type Outline = {chapters: Chapter[]; scenes: Scene[]};
 
+function firstSceneId(outline: Outline): string | null {
+  const sceneByChapter = new Map<string, Scene[]>();
+  for (const scene of outline.scenes) {
+    const scenes = sceneByChapter.get(scene.chapter_id) ?? [];
+    scenes.push(scene);
+    sceneByChapter.set(scene.chapter_id, scenes);
+  }
+
+  for (const chapter of [...outline.chapters].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title))) {
+    const firstScene = (sceneByChapter.get(chapter.id) ?? []).sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title))[0];
+    if (firstScene) return firstScene.id;
+  }
+
+  return outline.scenes[0]?.id ?? null;
+}
+
 type ProjectState = {
   projects: Project[];
   activeProject: Project | null;
@@ -40,7 +56,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const activeProject = await api.getProject(id);
       const outline = await api.outline(id);
-      const firstScene = outline.scenes[0]?.id ?? null;
+      const firstScene = firstSceneId(outline);
       set({activeProject, outline, activeSceneId: firstScene, lastError: null});
     } catch (e) {
       set({lastError: (e as Error).message});
@@ -51,7 +67,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!p) return null;
     const outline = await api.outline(p.id);
     const currentSceneId = get().activeSceneId;
-    const nextSceneId = currentSceneId && outline.scenes.some((scene) => scene.id === currentSceneId) ? currentSceneId : (outline.scenes[0]?.id ?? null);
+    const nextSceneId = currentSceneId && outline.scenes.some((scene) => scene.id === currentSceneId) ? currentSceneId : firstSceneId(outline);
     set({outline, activeSceneId: nextSceneId});
     return outline;
   },
@@ -59,7 +75,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createProject: async (name, genres, targetWords) => {
     const p = await api.createProject({name, genres, target_words: targetWords});
     const outline = await api.outline(p.id);
-    const firstScene = outline.scenes[0]?.id ?? null;
+    const firstScene = firstSceneId(outline);
     set((s) => ({
       projects: [p, ...s.projects.filter((x) => x.id !== p.id)],
       activeProject: p,

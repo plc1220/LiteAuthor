@@ -1,7 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import type {PointerEvent, WheelEvent} from 'react';
 import {
-  ArrowUpDown,
   BookOpen,
   CheckCircle2,
   ClipboardPaste,
@@ -13,11 +12,8 @@ import {
   Minus,
   Move,
   Plus,
-  RefreshCw,
   ScanSearch,
-  Sparkles,
   StickyNote,
-  SlidersHorizontal,
   Trash2,
   TriangleAlert,
   WandSparkles,
@@ -106,6 +102,9 @@ type AppliedOrderItem = {
 };
 
 const canvasApi = api as CanvasApiClient;
+
+/** Single board organization strategy: meaning-first ordering (no user-facing mode switch). */
+const BOARD_MODE: SortMode = 'semantic';
 
 const STOP_WORDS = new Set([
   'the',
@@ -345,6 +344,21 @@ function canvasArtifacts(canvas: StoryCanvasData | null) {
     .map((node, index) => artifactFromNode(node, index));
 }
 
+/** Prefer the live paste; if empty, use the saved source block from the board (so Re-read works after reload). */
+function sourceTextForCanvasAnalyze(canvas: StoryCanvasData | null, paste: string): string {
+  const trimmed = paste.trim();
+  if (trimmed) return trimmed;
+  for (const node of canvas?.nodes ?? []) {
+    const semantic = String(node.metadata?.semantic_type ?? '');
+    const nodeType = String(node.type ?? '').toLowerCase();
+    if (semantic === 'Artifact' || nodeType === 'artifact') {
+      const body = String(node.text ?? '').trim();
+      if (body) return body;
+    }
+  }
+  return '';
+}
+
 function selectedCardInsights(artifact: CanvasArtifact | null) {
   if (!artifact) {
     return {
@@ -529,7 +543,6 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const activeProject = useProjectStore((s) => s.activeProject);
 
   const [artifactText, setArtifactText] = useState('');
-  const [sortMode, setSortMode] = useState<SortMode>('semantic');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [captureNotes, setCaptureNotes] = useState('');
   const [captures, setCaptures] = useState<CaptureEntry[]>([]);
@@ -542,7 +555,6 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const [lastReadText, setLastReadText] = useState('');
   const [analysisStatus, setAnalysisStatus] = useState('Local parse ready.');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isAutosorting, setIsAutosorting] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isApplyingOrder, setIsApplyingOrder] = useState(false);
   const suggestedOrderRef = useRef<HTMLElement | null>(null);
@@ -564,10 +576,8 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     if (!storageKey || typeof window === 'undefined') return;
     const savedText = window.localStorage.getItem(storageKey);
     const savedNotes = window.localStorage.getItem(`${storageKey}.capture-notes`);
-    const savedSort = window.localStorage.getItem(`${storageKey}.sort-mode`);
     setArtifactText(savedText ?? '');
     setCaptureNotes(savedNotes ?? '');
-    setSortMode(savedSort === 'chronological' || savedSort === 'density' ? savedSort : 'semantic');
     setSelectedId(null);
     setCaptures([]);
     setOrderProposals([]);
@@ -611,11 +621,6 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     window.localStorage.setItem(`${storageKey}.capture-notes`, captureNotes);
   }, [captureNotes, storageKey]);
 
-  useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') return;
-    window.localStorage.setItem(`${storageKey}.sort-mode`, sortMode);
-  }, [sortMode, storageKey]);
-
   const localAnalysis = useMemo(() => buildLocalAnalysis(artifactText), [artifactText]);
 
   const [analysis, setAnalysis] = useState<CanvasAnalysis>(() => buildDraftAnalysis(''));
@@ -628,14 +633,16 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     setLastAppliedItems([]);
   }, [artifactText, canvas?.nodes?.length]);
 
-  const artifacts = useMemo(() => sortArtifacts(analysis.artifacts, sortMode), [analysis.artifacts, sortMode]);
+  const pasteWordCount = useMemo(() => words(artifactText).length, [artifactText]);
+  const artifacts = useMemo(() => sortArtifacts(analysis.artifacts, BOARD_MODE), [analysis.artifacts]);
   const selectedNode = useMemo(() => canvas?.nodes.find((node) => node.id === selectedId) ?? null, [canvas, selectedId]);
   const selectedArtifact = useMemo(() => {
     if (selectedNode) return artifactFromNode(selectedNode, 0);
     return artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts[0] ?? null;
   }, [artifacts, selectedId, selectedNode]);
   const hasInput = artifactText.trim().length > 0;
-  const hasUnreadInput = hasInput && artifactText !== lastReadText;
+  const readChaosSourceText = useMemo(() => sourceTextForCanvasAnalyze(canvas, artifactText), [canvas, artifactText]);
+  const hasUnreadInput = Boolean(readChaosSourceText) && readChaosSourceText !== lastReadText;
 
   useEffect(() => {
     if (artifacts.length === 0) {
@@ -687,7 +694,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     return Object.entries(counts).map(([label, count]) => `${count} ${label} update${count === 1 ? '' : 's'}`);
   }, [lastAppliedItems]);
 
-  const canReadChaos = hasInput && !isAnalyzing;
+  const canReadChaos = Boolean(readChaosSourceText) && !isAnalyzing;
   const canReviewSuggestedOrder = orderProposals.length > 0 && !isApplyingOrder;
 
   const reviewSuggestedOrder = () => {
@@ -696,14 +703,19 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
   const syncAnalysis = async () => {
     if (!activeProject) return;
+    const analyzeText = sourceTextForCanvasAnalyze(canvas, artifactText);
+    if (!analyzeText.trim()) {
+      setAnalysisStatus('Nothing to read — paste on the left or open a board with a source card.');
+      return;
+    }
     setIsAnalyzing(true);
     setAnalysisStatus('Analyzing canvas...');
     try {
       const result = await canvasApi.canvasAnalyze?.(activeProject.id, {
-        text: artifactText,
+        text: analyzeText,
         project_id: activeProject.id,
         source: 'story_canvas',
-        mode: sortMode,
+        mode: BOARD_MODE,
       });
 
       if (result) {
@@ -718,7 +730,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         const nextProposals = Array.isArray(result.proposals) ? result.proposals : [];
         if (remoteCanvas) {
           setCanvas(remoteCanvas);
-          setLastReadText(artifactText);
+          setLastReadText(analyzeText);
           window.requestAnimationFrame(() => fitToContent(remoteCanvas.nodes));
         }
         setAnalysis({
@@ -744,66 +756,17 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
       setOrderProposals([]);
       setSelectedProposalIds(new Set());
       setLastAppliedItems([]);
+      setLastReadText(analyzeText);
       setAnalysisStatus('Local analysis refreshed.');
     } catch {
       setAnalysis(localAnalysis);
       setOrderProposals([]);
       setSelectedProposalIds(new Set());
       setLastAppliedItems([]);
+      setLastReadText(analyzeText);
       setAnalysisStatus('Local analysis refreshed.');
     } finally {
       setIsAnalyzing(false);
-    }
-  };
-
-  const autosort = async (mode: SortMode) => {
-    if (!activeProject) return;
-    setSortMode(mode);
-    setIsAutosorting(true);
-    setAnalysisStatus(`Sorting by ${mode}...`);
-    try {
-      const result = await canvasApi.canvasAutosort?.(activeProject.id, {
-        text: artifactText,
-        project_id: activeProject.id,
-        mode,
-        canvas: canvas ?? undefined,
-        artifacts,
-      });
-      if (result) {
-        if (result.canvas) {
-          setCanvas(result.canvas);
-          window.requestAnimationFrame(() => fitToContent(result.canvas?.nodes ?? []));
-          const nodeArtifacts = canvasArtifacts(result.canvas);
-          setAnalysis((current) => ({
-            ...current,
-            summary: result.summary ?? result.message ?? current.summary,
-            artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : current.artifacts,
-          }));
-          setAnalysisStatus(`Autosort ready for ${mode}.`);
-          return;
-        }
-        const remoteArtifacts = Array.isArray(result.artifacts) ? result.artifacts.map((item, index) => normalizeArtifact(item, index)) : [];
-        if (remoteArtifacts.length > 0) {
-          setAnalysis((current) => ({
-            ...current,
-            summary: result.summary ?? result.message ?? current.summary,
-            artifacts: remoteArtifacts,
-            hints: Array.isArray(result.hints)
-              ? result.hints.map((item, index) => normalizeHint(item, index))
-              : Array.isArray(result.semantic_hints)
-                ? result.semantic_hints.map((item, index) => normalizeHint(item, index))
-                : current.hints,
-            capture: result.capture ?? result.review ?? current.capture,
-          }));
-        }
-        setAnalysisStatus(`Autosort ready for ${mode}.`);
-        return;
-      }
-      setAnalysisStatus(`Autosort set to ${mode}.`);
-    } catch {
-      setAnalysisStatus(`Autosort set to ${mode}.`);
-    } finally {
-      setIsAutosorting(false);
     }
   };
 
@@ -816,9 +779,9 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
     try {
       const result = await canvasApi.canvasCapture?.(activeProject.id, {
-        text: artifactText,
+        text: sourceTextForCanvasAnalyze(canvas, artifactText),
         project_id: activeProject.id,
-        mode: sortMode,
+        mode: BOARD_MODE,
         selected_ids: selectedIds,
         notes: captureNotes.trim(),
         artifacts,
@@ -1102,7 +1065,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
   if (!activeProject) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-parchment text-ink px-6 text-center">
+      <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-parchment text-ink px-6 text-center">
         <div className="max-w-md">
           <p className="font-serif text-lg italic mb-4">Select a project before opening Story Canvas.</p>
           <button
@@ -1119,8 +1082,8 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   }
 
   return (
-    <div className="min-h-screen bg-parchment text-ink">
-      <header className="sticky top-0 z-40 border-b border-oak-variant bg-parchment-bright/95 backdrop-blur px-5 py-4 md:px-8">
+    <div className="flex h-full min-h-0 flex-col bg-parchment text-ink">
+      <header className="sticky top-0 z-40 shrink-0 border-b border-oak-variant bg-parchment-bright/95 backdrop-blur px-5 py-4 md:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low">
@@ -1149,22 +1112,22 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
               disabled={!canReviewSuggestedOrder}
             >
               <CheckCircle2 className="w-4 h-4" />
-              {orderProposals.length > 0 ? 'Review Suggested Order' : 'Distill into Order'}
+              {orderProposals.length > 0 ? 'Review updates' : 'Read for updates'}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="grid min-h-[calc(100vh-80px)] grid-cols-1 xl:grid-cols-[350px_minmax(0,1fr)_360px]">
-        <aside className="border-r border-oak-variant bg-sepia-low/70">
-          <div className="flex h-full flex-col gap-6 p-5 md:p-6">
+      <main className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[350px_minmax(0,1fr)_320px] xl:overflow-hidden">
+        <aside className="flex h-full min-h-0 flex-col border-r border-oak-variant bg-sepia-low/70 xl:overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-5 md:p-6">
             <section className="space-y-4 rounded-sm border border-oak-variant bg-parchment-bright p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Input</p>
                   <h2 className="mt-1 text-lg font-serif italic text-primary">Paste or drop notes</h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <button
                     type="button"
                     className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
@@ -1186,6 +1149,22 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                     <ScanSearch className="w-4 h-4" />
                     {isAnalyzing ? 'Reading' : canvas?.nodes?.length && !hasUnreadInput ? 'Re-read' : 'Read Chaos'}
                   </button>
+                  <button
+                    type="button"
+                    className="px-2 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted underline decoration-oak-variant/80 underline-offset-4 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!readChaosSourceText && !canvas?.nodes?.length}
+                    onClick={() => {
+                      setArtifactText('');
+                      setCanvas(null);
+                      setLastReadText('');
+                      setOrderProposals([]);
+                      setSelectedProposalIds(new Set());
+                      setLastAppliedItems([]);
+                      setAnalysisStatus('Board cleared.');
+                    }}
+                  >
+                    Start over
+                  </button>
                 </div>
               </div>
 
@@ -1202,38 +1181,6 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                   setLastAppliedItems([]);
                 }}
               />
-
-              <div className="flex flex-wrap gap-2">
-                {(['semantic', 'chronological', 'density'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-sans uppercase tracking-widest ${
-                      sortMode === mode ? 'border-primary bg-amber-wax-container text-parchment' : 'border-oak-variant bg-sepia-high text-ink-muted'
-                    }`}
-                    onClick={() => void autosort(mode)}
-                  >
-                    {mode === 'semantic' ? <Sparkles className="w-3.5 h-3.5" /> : mode === 'chronological' ? <ArrowUpDown className="w-3.5 h-3.5" /> : <SlidersHorizontal className="w-3.5 h-3.5" />}
-                    {mode}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-full border border-oak-variant bg-sepia-high px-3 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-                  onClick={() => {
-                    setArtifactText('');
-                    setCanvas(null);
-                    setLastReadText('');
-                    setOrderProposals([]);
-                    setSelectedProposalIds(new Set());
-                    setLastAppliedItems([]);
-                    setAnalysisStatus('Canvas cleared.');
-                  }}
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Clear
-                </button>
-              </div>
             </section>
 
             <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
@@ -1248,8 +1195,8 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                   <div className="mt-1 text-lg font-semibold text-primary">{artifacts.length}</div>
                 </div>
                 <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                  <div className="text-[10px] uppercase tracking-widest text-ink-muted">Mode</div>
-                  <div className="mt-1 text-lg font-semibold text-primary capitalize">{sortMode}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-ink-muted">Words in paste</div>
+                  <div className="mt-1 text-lg font-semibold text-primary">{pasteWordCount}</div>
                 </div>
               </div>
               <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-ink-muted">{keywordLine}</p>
@@ -1266,17 +1213,26 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                 <span className="text-[10px] uppercase tracking-widest text-ink-muted">Private</span>
               </div>
               <textarea
-                className="mt-3 min-h-[120px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
-                placeholder="Write a private review note before you apply story updates."
+                className="mt-3 min-h-[100px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
+                placeholder="Optional private note (saved with the board)."
                 value={captureNotes}
                 onChange={(e) => setCaptureNotes(e.target.value)}
               />
+              <button
+                type="button"
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void captureReview()}
+                disabled={isCapturing}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {isCapturing ? 'Saving…' : 'Save note to log'}
+              </button>
             </section>
           </div>
         </aside>
 
-        <section className="relative overflow-hidden bg-parchment-dim">
-          <div className="border-b border-oak-variant bg-parchment/70 px-5 py-4 md:px-8">
+        <section className="relative flex min-h-[50vh] flex-1 flex-col overflow-hidden bg-parchment-dim xl:min-h-0">
+          <div className="shrink-0 border-b border-oak-variant bg-parchment/70 px-5 py-4 md:px-8">
             <div className="flex flex-wrap items-center gap-3 justify-between">
               <div>
                 <p className="text-[10px] font-sans uppercase tracking-[0.28em] text-ink-muted">Board</p>
@@ -1291,7 +1247,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
           <div
             ref={boardRef}
-            className="relative min-h-[calc(100vh-208px)] cursor-grab overflow-hidden p-5 md:p-8"
+            className="relative min-h-0 flex-1 cursor-grab overflow-hidden p-5 md:p-8"
             onPointerDown={startPan}
             onPointerMove={movePointer}
             onPointerUp={endPointer}
@@ -1554,136 +1510,126 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
           </div>
         </section>
 
-        <aside className="border-l border-oak-variant bg-sepia-low/70">
-          <div className="flex h-full flex-col gap-6 p-5 md:p-6">
-            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Selected card</p>
-                  <h2 className="mt-1 text-lg font-serif italic text-primary">{selectedArtifact?.title ?? 'Nothing selected'}</h2>
-                </div>
-                <div className="flex items-center gap-2 text-ink-muted">
-                  <Layers3 className="w-4 h-4" />
-                </div>
-              </div>
-
+        <aside className="flex h-full min-h-0 max-h-full flex-col border-l border-oak-variant bg-sepia-low/70 xl:overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain p-4 md:p-5">
+            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
+              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Selection</p>
               {selectedArtifact ? (
-                <div className="mt-4 space-y-4">
+                <>
+                  <h2 className="mt-1 font-serif text-lg font-semibold italic leading-snug text-primary">{selectedArtifact.title}</h2>
                   {canvas?.nodes?.length ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-low px-2 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary sm:flex-none"
                         onClick={editSelectedCard}
                       >
-                        <Move className="h-4 w-4" />
+                        <Move className="h-3.5 w-3.5" />
                         Edit
                       </button>
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center gap-2 rounded-sm border border-red-500/45 bg-red-50 px-3 py-2 text-[10px] font-sans font-bold uppercase tracking-widest text-red-700 hover:border-red-600 hover:bg-red-100"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm border border-red-500/45 bg-red-50 px-2 py-1.5 text-[10px] font-sans font-bold uppercase tracking-widest text-red-700 hover:border-red-600 hover:bg-red-100 sm:flex-none"
                         onClick={deleteSelectedNode}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                         Delete
                       </button>
                     </div>
                   ) : null}
-                  <p className="text-sm leading-relaxed text-ink-muted">{selectedArtifact.excerpt}</p>
-                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Detected role</div>
-                    <div className="mt-1 text-sm font-semibold text-primary">{selectedInsights.role}</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                      <div className="text-[10px] uppercase tracking-widest text-ink-muted">Kind</div>
-                      <div className="mt-1 capitalize text-primary">{selectedArtifact.kind}</div>
-                    </div>
-                    <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                      <div className="text-[10px] uppercase tracking-widest text-ink-muted">Status</div>
-                      <div className="mt-1 capitalize text-primary">{selectedArtifact.status}</div>
-                    </div>
-                  </div>
-                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Tags</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selectedArtifact.tags.length > 0 ? (
-                        selectedArtifact.tags.map((tag) => (
-                          <span key={tag} className="rounded-full border border-oak-variant bg-parchment px-2.5 py-1 text-[10px] font-sans uppercase tracking-widest text-ink-muted">
-                            {tag}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-ink-muted">No tags extracted.</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Extracted notes</div>
-                    <ul className="mt-2 space-y-2 text-sm leading-relaxed text-ink-muted">
-                      {selectedInsights.notes.map((note) => (
-                        <li key={note}>{note}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                    <div className="text-[10px] uppercase tracking-widest text-ink-muted">Suggested Order</div>
-                    <div className="mt-2 space-y-2">
-                      {selectedInsights.suggestions.map((suggestion) => (
-                        <label key={suggestion} className="flex items-center gap-2 text-sm text-ink-muted">
-                          <input type="checkbox" className="h-4 w-4 accent-primary" defaultChecked={suggestion !== 'Find contradiction'} />
-                          <span>{suggestion}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                  <p className="mt-3 line-clamp-6 text-sm leading-relaxed text-ink-muted">{selectedArtifact.excerpt}</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+                    <span className="font-medium text-ink">{selectedInsights.role}</span>
+                    <span>
+                      {' · '}
+                      <span className="capitalize">{selectedArtifact.kind}</span>
+                      {selectedArtifact.status !== 'draft' ? ` · ${selectedArtifact.status}` : null}
+                    </span>
+                    {selectedArtifact.tags.length > 0 ? (
+                      <span className="mt-1 block text-[11px] text-ink-muted/90">{selectedArtifact.tags.slice(0, 6).join(' · ')}</span>
+                    ) : null}
+                  </p>
+                </>
               ) : (
-                <p className="mt-4 text-sm leading-relaxed text-ink-muted">Select a card to inspect its signal, tags, and review status.</p>
+                <p className="mt-2 text-sm text-ink-muted">Select a card on the board.</p>
               )}
             </section>
 
-            <section ref={suggestedOrderRef} className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Suggested Order</p>
-                  <h3 className="mt-1 text-lg font-serif italic text-primary">
-                    {orderProposals.length > 0
-                      ? `${orderProposals.length} suggestion${orderProposals.length === 1 ? '' : 's'} found`
-                      : lastAppliedItems.length > 0
-                        ? 'Order updated'
-                        : hasInput
-                          ? 'Ready to read'
-                          : 'No suggestions yet'}
-                  </h3>
-                </div>
-                <Sparkles className="h-4 w-4 text-primary" />
+            <section ref={suggestedOrderRef} className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
+              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Updates from Read Chaos</p>
+              <p className="mt-1 font-serif text-base font-semibold italic text-primary">
+                {orderProposals.length > 0
+                  ? `${orderProposals.length} to review`
+                  : lastAppliedItems.length > 0
+                    ? 'Last run applied'
+                    : readChaosSourceText
+                      ? hasUnreadInput
+                        ? 'Ready to read'
+                        : 'Board is current'
+                      : 'Nothing yet'}
+              </p>
+
+              <div className="mt-2 flex flex-col gap-2">
+                {orderProposals.length > 0 ? (
+                  <>
+                    <button
+                      type="button"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2.5 text-[11px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void applyOrderProposals()}
+                      disabled={isApplyingOrder || selectedOrderProposals.length === 0}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {isApplyingOrder ? 'Applying…' : `Apply ${selectedOrderProposals.length}`}
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void syncAnalysis()}
+                      disabled={!canReadChaos || isAnalyzing || isApplyingOrder}
+                    >
+                      <ScanSearch className="h-3.5 w-3.5" />
+                      {isAnalyzing ? 'Reading…' : 'Re-read board'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2.5 text-[11px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => void syncAnalysis()}
+                    disabled={!canReadChaos || isAnalyzing || isApplyingOrder}
+                  >
+                    <ScanSearch className="h-3.5 w-3.5" />
+                    {isAnalyzing ? 'Reading…' : canvas?.nodes?.length && !hasUnreadInput ? 'Re-read board' : 'Read Chaos'}
+                  </button>
+                )}
               </div>
 
-              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                {orderProposals.length > 0
-                  ? 'Review what should become canon, timeline, or manuscript structure before applying it.'
-                  : lastAppliedItems.length > 0
-                    ? 'Added selected updates to the story memory. You can keep shaping the board or move into the updated workspaces.'
-                    : 'Read Chaos to surface canon, timeline, and manuscript suggestions from the board.'}
-              </p>
+              {orderProposals.length > 0 ? (
+                <p className="mt-2 text-xs text-ink-muted">Select suggestions in the list, then tap Apply above.</p>
+              ) : lastAppliedItems.length > 0 ? (
+                <p className="mt-2 text-xs text-ink-muted">Open a workspace when you are ready.</p>
+              ) : readChaosSourceText ? (
+                <p className="mt-2 text-xs text-ink-muted">Suggestions for bible, timeline, and manuscript appear here after you read.</p>
+              ) : (
+                <p className="mt-2 text-xs text-ink-muted">Paste story text on the left to begin.</p>
+              )}
 
               {orderProposals.length > 0 ? (
                 <>
-                  <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-3 max-h-60 space-y-2 overflow-y-auto pr-0.5">
                     {orderProposals.map((proposal) => {
                       const selected = selectedProposalIds.has(proposal.id);
                       return (
                         <label
                           key={proposal.id}
-                          className={`block cursor-pointer rounded-sm border p-3 transition-colors ${
+                          className={`block cursor-pointer rounded-sm border p-2.5 transition-colors ${
                             selected ? 'border-primary/45 bg-sepia-highest' : 'border-oak-variant bg-sepia-low hover:border-primary/40'
                           }`}
                         >
-                          <span className="flex items-start gap-3">
+                          <span className="flex items-start gap-2">
                             <input
                               type="checkbox"
-                              className="mt-1 h-4 w-4 accent-primary"
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
                               checked={selected}
                               onChange={(event) => {
                                 setSelectedProposalIds((current) => {
@@ -1695,12 +1641,11 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                               }}
                             />
                             <span className="min-w-0">
-                              <span className="block font-sans text-[10px] font-bold uppercase tracking-widest text-primary">
+                              <span className="block font-sans text-[9px] font-bold uppercase tracking-widest text-primary">
                                 {proposalKindLabel(proposal.kind)}
                               </span>
-                              <span className="mt-1 block text-sm font-semibold leading-snug text-ink">{proposal.title}</span>
-                              <span className="mt-1 block break-all font-mono text-[10px] text-ink-muted">{proposal.target}</span>
-                              <span className="mt-2 line-clamp-3 block text-xs leading-relaxed text-ink-muted">{proposalPreview(proposal.content)}</span>
+                              <span className="mt-0.5 block text-sm font-semibold leading-snug text-ink">{proposal.title}</span>
+                              <span className="mt-2 line-clamp-2 block text-[11px] leading-relaxed text-ink-muted">{proposalPreview(proposal.content)}</span>
                             </span>
                           </span>
                         </label>
@@ -1708,17 +1653,17 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                     })}
                   </div>
 
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-2 flex gap-2">
                     <button
                       type="button"
-                      className="flex-1 rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                      className="flex-1 rounded-sm border border-oak-variant px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
                       onClick={() => setSelectedProposalIds(new Set(orderProposals.map((proposal) => proposal.id)))}
                     >
                       All
                     </button>
                     <button
                       type="button"
-                      className="flex-1 rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                      className="flex-1 rounded-sm border border-oak-variant px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
                       onClick={() => setSelectedProposalIds(new Set())}
                     >
                       None
@@ -1728,100 +1673,59 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
               ) : null}
 
               {orderProposals.length === 0 && lastAppliedItems.length > 0 ? (
-                <div className="mt-4 rounded-sm border border-oak-variant bg-sepia-low p-3">
-                  <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Added</p>
-                  <ul className="mt-2 space-y-1 text-sm text-ink-muted">
+                <div className="mt-3 rounded-sm border border-oak-variant bg-sepia-low p-2.5">
+                  <ul className="space-y-1 text-xs text-ink-muted">
                     {appliedOrderSummary.map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
-                  <div className="mt-4 grid gap-2">
+                  <div className="mt-2 grid gap-1.5">
                     <button
                       type="button"
-                      className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
+                      className="rounded-sm border border-oak-variant px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
                       onClick={() => onNavigate('TimelineView', 'push')}
                     >
-                      Open Timeline
+                      Timeline
                     </button>
                     <button
                       type="button"
-                      className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
+                      className="rounded-sm border border-oak-variant px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
                       onClick={() => onNavigate('StoryBible', 'push')}
                     >
-                      Open Story Bible
+                      Story Bible
                     </button>
                     <button
                       type="button"
-                      className="rounded-sm bg-primary px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-parchment hover:bg-amber-wax"
+                      className="rounded-sm bg-primary px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-parchment hover:bg-amber-wax"
                       onClick={() => onNavigate('ZenEditor', 'push')}
                     >
-                      Continue Writing
+                      Continue writing
                     </button>
                   </div>
                 </div>
               ) : null}
-
-              <button
-                type="button"
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2.5 text-xs font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => void (orderProposals.length > 0 ? applyOrderProposals() : syncAnalysis())}
-                disabled={isAnalyzing || isApplyingOrder || (!hasInput && orderProposals.length === 0) || (orderProposals.length > 0 && selectedOrderProposals.length === 0)}
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                {isApplyingOrder ? 'Applying' : orderProposals.length > 0 ? `Apply ${selectedOrderProposals.length} update${selectedOrderProposals.length === 1 ? '' : 's'}` : 'Read Chaos'}
-              </button>
             </section>
 
-            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Save board note</h3>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                Preserve the board state, selected card, and private note without applying canon or timeline updates.
-              </p>
-              <button
-                type="button"
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-4 py-2.5 text-xs font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => void captureReview()}
-                disabled={isCapturing}
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                {isCapturing ? 'Saving' : 'Save board note'}
-              </button>
-            </section>
-
-            <section className="flex-1 rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center gap-2">
-                <TriangleAlert className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Apply log</h3>
-              </div>
-              <div className="mt-4 space-y-3">
+            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
+              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Activity</p>
+              <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-0.5">
                 {lastAppliedItems.length > 0 ? (
-                  <article className="rounded-sm border border-primary/35 bg-sepia-highest p-3">
-                    <div className="flex items-center justify-between gap-4">
-                      <h4 className="text-sm font-semibold text-primary">Latest story update</h4>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-muted">Applied</span>
-                    </div>
-                    <ul className="mt-2 space-y-1 text-sm text-ink-muted">
-                      {appliedOrderSummary.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </article>
+                  <ul className="rounded-sm border border-primary/30 bg-sepia-highest/80 p-2 text-xs text-ink-muted">
+                    {appliedOrderSummary.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
                 ) : null}
                 {captures.length === 0 && lastAppliedItems.length === 0 ? (
-                  <div className="rounded-sm border border-dashed border-oak-variant bg-sepia-low p-4 text-sm text-ink-muted">
-                    No applied updates or board notes yet.
-                  </div>
+                  <p className="text-xs text-ink-muted">No saves or applied updates yet.</p>
                 ) : (
                   captures.map((entry) => (
-                    <article key={entry.id} className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                      <div className="flex items-center justify-between gap-4">
-                        <h4 className="text-sm font-semibold text-primary">{entry.title}</h4>
-                        <span className="text-[10px] uppercase tracking-widest text-ink-muted">{entry.at}</span>
+                    <article key={entry.id} className="rounded-sm border border-oak-variant bg-sepia-low p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="text-xs font-semibold text-primary">{entry.title}</h4>
+                        <span className="shrink-0 text-[9px] uppercase tracking-widest text-ink-muted">{entry.at}</span>
                       </div>
-                      <p className="mt-2 text-sm leading-relaxed text-ink-muted">{entry.detail}</p>
+                      <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-ink-muted">{entry.detail}</p>
                     </article>
                   ))
                 )}

@@ -1,5 +1,5 @@
 import {useMemo, useState} from 'react';
-import {ArrowLeft, ArrowRight, GitBranch, MessageSquare, RefreshCw, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, GitBranch, MessageSquare, RefreshCw, Send, X} from 'lucide-react';
 import {diffWords} from 'diff';
 
 export type SuggestionPanelView = 'original' | 'suggestion' | 'diff' | 'split';
@@ -22,22 +22,28 @@ export type SuggestionPanelProps = {
   defaultView?: SuggestionPanelView;
   busy?: boolean;
   unsupportedActions?: SuggestionPanelAction[];
+  /** When true, show “Insert below” beside Accept / Reject (e.g. expand-with-choice). */
+  showInsertBelow?: boolean;
+  acceptLabel?: string;
+  rejectLabel?: string;
   className?: string;
   onAccept?: (alternative: SuggestionAlternative) => void;
   onReject?: (alternative: SuggestionAlternative) => void;
+  onInsertBelow?: (alternative: SuggestionAlternative) => void;
   onBranch?: (alternative: SuggestionAlternative) => void;
   onNote?: (alternative: SuggestionAlternative) => void;
   onRegenerate?: () => void;
+  onRegenerateWithInstruction?: (instruction: string) => void;
   onShowContextInspector?: () => void;
   onClose?: () => void;
   onAlternativeChange?: (alternative: SuggestionAlternative) => void;
 };
 
 const VIEWS: {id: SuggestionPanelView; label: string}[] = [
-  {id: 'original', label: 'Original'},
   {id: 'suggestion', label: 'Suggestion'},
-  {id: 'diff', label: 'Diff'},
   {id: 'split', label: 'Split'},
+  {id: 'diff', label: 'Diff'},
+  {id: 'original', label: 'Original'},
 ];
 
 function countWords(text: string): number {
@@ -67,12 +73,17 @@ export function SuggestionPanel({
   defaultView = 'diff',
   busy,
   unsupportedActions,
+  showInsertBelow,
+  acceptLabel = 'Replace selected text',
+  rejectLabel = 'Keep original',
   className = '',
   onAccept,
   onReject,
+  onInsertBelow,
   onBranch,
   onNote,
   onRegenerate,
+  onRegenerateWithInstruction,
   onShowContextInspector,
   onClose,
   onAlternativeChange,
@@ -83,6 +94,8 @@ export function SuggestionPanel({
   );
   const [view, setView] = useState<SuggestionPanelView>(defaultView);
   const [activeIndex, setActiveIndex] = useState(initialIndex);
+  const [affectedOpen, setAffectedOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
   const activeAlternative = alternatives[activeIndex] ?? alternatives[0];
   const proposedText = activeAlternative?.proposedText ?? '';
   const diffParts = useMemo(() => diffWords(originalText, proposedText), [originalText, proposedText]);
@@ -98,27 +111,23 @@ export function SuggestionPanel({
   };
 
   const renderDiff = () => (
-    <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap">
+    <div className="font-serif text-[13px] leading-relaxed whitespace-pre-wrap text-ink">
       {diffParts.map((part, index) => {
         if (part.added) {
           return (
-            <span key={index} className="bg-emerald-900/45 text-emerald-100">
+            <span key={index} className="bg-emerald-700/15 text-ink border-b border-emerald-700/25">
               {part.value}
             </span>
           );
         }
         if (part.removed) {
           return (
-            <span key={index} className="bg-red-900/45 text-red-100 line-through">
+            <span key={index} className="bg-red-900/20 text-ink-muted line-through decoration-red-900/40">
               {part.value}
             </span>
           );
         }
-        return (
-          <span key={index} className="text-ink-muted">
-            {part.value}
-          </span>
-        );
+        return <span key={index}>{part.value}</span>;
       })}
     </div>
   );
@@ -126,33 +135,39 @@ export function SuggestionPanel({
   const renderContent = () => {
     if (!activeAlternative) {
       return (
-        <div className="rounded-sm border border-dashed border-oak-variant bg-parchment-bright/40 p-4 text-sm italic text-ink-muted">
+        <div className="rounded-sm border border-dashed border-oak-variant bg-parchment-bright/60 p-4 text-sm italic text-ink-muted">
           No suggestion is available yet.
         </div>
       );
     }
 
     if (view === 'original') {
-      return <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap">{originalText}</div>;
+      return <div className="font-serif text-[13px] leading-relaxed whitespace-pre-wrap text-ink">{originalText}</div>;
     }
     if (view === 'suggestion') {
-      return <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap">{proposedText}</div>;
+      return <div className="font-serif text-[13px] leading-relaxed whitespace-pre-wrap text-ink">{proposedText}</div>;
     }
     if (view === 'split') {
       return (
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid grid-cols-2 gap-4 text-[13px]">
           <div>
-            <div className="mb-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted">Original</div>
+            <div className="mb-2 font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted">Original</div>
             {Array.from({length: paragraphCount}).map((_, index) => (
-              <p key={index} className="mb-3 rounded-sm border border-oak-variant bg-parchment-bright p-3 font-serif leading-relaxed">
+              <p
+                key={index}
+                className="mb-3 rounded-sm border border-oak-variant bg-parchment-bright/80 p-3 font-serif leading-relaxed text-ink"
+              >
                 {originalParagraphs[index] ?? ''}
               </p>
             ))}
           </div>
           <div>
-            <div className="mb-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted">Suggestion</div>
+            <div className="mb-2 font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted">Suggestion</div>
             {Array.from({length: paragraphCount}).map((_, index) => (
-              <p key={index} className="mb-3 rounded-sm border border-oak-variant bg-parchment-bright p-3 font-serif leading-relaxed">
+              <p
+                key={index}
+                className="mb-3 rounded-sm border border-oak-variant bg-parchment-bright/80 p-3 font-serif leading-relaxed text-ink"
+              >
                 {proposedParagraphs[index] ?? ''}
               </p>
             ))}
@@ -169,49 +184,109 @@ export function SuggestionPanel({
   const branchDisabled = actionDisabled('branch', busy, unsupportedActions, activeAlternative && onBranch ? () => onBranch(activeAlternative) : undefined);
   const noteDisabled = actionDisabled('note', busy, unsupportedActions, activeAlternative && onNote ? () => onNote(activeAlternative) : undefined);
   const regenerateDisabled = actionDisabled('regenerate', busy, unsupportedActions, onRegenerate);
+  const insertBelowDisabled = Boolean(busy || !activeAlternative || !onInsertBelow);
 
   return (
-    <aside className={`fixed right-0 top-10 bottom-8 z-40 w-[380px] max-w-[calc(100vw-1rem)] bg-sepia-mid border-l border-oak-variant text-ink shadow-2xl flex flex-col ${className}`}>
-      <header className="p-4 border-b border-oak-variant bg-sepia-high">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">Suggestion Panel</div>
-            <h2 className="mt-1 font-serif text-lg font-semibold text-primary truncate" title={actionLabel}>
+    <aside
+      className={`fixed right-0 top-24 bottom-8 z-40 flex w-[min(400px,calc(100vw-1rem))] flex-col border-l border-outline-variant bg-surface-container-lowest text-ink shadow-[inset_1px_0_0_0_var(--color-outline-variant)] sm:top-12 ${className}`}
+    >
+      <header className="shrink-0 border-b border-outline-variant bg-parchment-bright px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted">Suggestion</div>
+            <h2 className="mt-1.5 font-serif text-xl font-semibold leading-snug text-primary" title={actionLabel}>
               {actionLabel}
             </h2>
-            <p className="mt-1 text-xs text-ink-muted">{selectionSummary}</p>
+            <p className="mt-2 font-sans text-[11px] leading-snug text-ink-muted">{selectionSummary}</p>
           </div>
           {onClose ? (
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-sm text-ink-muted hover:text-ink hover:bg-sepia-highest"
+              className="shrink-0 rounded-sm p-1.5 text-ink-muted hover:bg-surface-container-high hover:text-ink"
               aria-label="Close suggestion panel"
             >
               <X className="h-4 w-4" />
             </button>
           ) : null}
         </div>
-        {activeAlternative?.explanation ? <p className="mt-3 text-xs italic text-ink-muted">{activeAlternative.explanation}</p> : null}
+
+        {activeAlternative?.explanation ? (
+          <div className="mt-4 border-t border-outline-variant/70 pt-4">
+            <div className="font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted">Why this works</div>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{activeAlternative.explanation}</p>
+          </div>
+        ) : null}
+
+        {originalText.trim() ? (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setAffectedOpen((open) => !open)}
+              className="font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted hover:text-primary"
+            >
+              Affected passage {affectedOpen ? '⌄' : '›'}
+            </button>
+            {affectedOpen ? (
+              <div className="mt-1.5 max-h-28 overflow-y-auto rounded-sm border border-oak-variant bg-surface-container-low px-3 py-2 font-serif text-[12px] leading-relaxed text-ink whitespace-pre-wrap">
+                {originalText}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {onShowContextInspector ? (
           <button
             type="button"
             onClick={onShowContextInspector}
-            className="mt-3 font-sans text-[10px] uppercase tracking-widest text-primary hover:text-amber-wax"
+            className="mt-3 font-sans text-[10px] font-semibold uppercase tracking-widest text-primary hover:text-amber-wax"
           >
             See what the AI received →
           </button>
         ) : null}
       </header>
 
-      <nav className="grid grid-cols-4 gap-1 p-3 border-b border-oak-variant bg-sepia-mid">
+      <div className="shrink-0 border-b border-outline-variant bg-surface-container-low px-5 py-3">
+        <div className={`grid gap-2 ${showInsertBelow && onInsertBelow ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'}`}>
+          <button
+            type="button"
+            disabled={acceptDisabled}
+            onClick={() => activeAlternative && onAccept?.(activeAlternative)}
+            className="btn-wax-seal rounded-sm px-3 py-2.5 font-sans text-[11px] font-semibold uppercase tracking-widest disabled:opacity-40"
+          >
+            {acceptLabel}
+          </button>
+          <button
+            type="button"
+            disabled={rejectDisabled}
+            onClick={() => activeAlternative && onReject?.(activeAlternative)}
+            className="rounded-sm border border-oak-variant bg-parchment-bright px-3 py-2.5 font-sans text-[11px] font-semibold uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:opacity-40"
+          >
+            {rejectLabel}
+          </button>
+          {showInsertBelow && onInsertBelow ? (
+            <button
+              type="button"
+              disabled={insertBelowDisabled}
+              onClick={() => activeAlternative && onInsertBelow(activeAlternative)}
+              className="rounded-sm border border-oak-variant bg-surface-container-high px-3 py-2.5 font-sans text-[11px] font-semibold uppercase tracking-widest text-ink hover:border-primary disabled:opacity-40"
+            >
+              Insert below
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <nav className="shrink-0 flex gap-1 border-b border-outline-variant bg-surface-container-low px-4 py-2">
         {VIEWS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setView(tab.id)}
-            className={`px-2 py-1.5 rounded-sm border font-sans text-[10px] uppercase tracking-widest ${
-              view === tab.id ? 'border-primary text-primary bg-sepia-highest' : 'border-oak-variant text-ink-muted hover:text-ink hover:border-primary'
+            className={`min-w-0 flex-1 rounded-sm px-2 py-2 font-sans text-[10px] font-semibold uppercase tracking-widest transition-colors ${
+              view === tab.id
+                ? 'border border-primary bg-primary text-parchment-bright'
+                : 'border border-transparent text-ink-muted hover:bg-surface-container-high hover:text-ink'
             }`}
           >
             {tab.label}
@@ -219,11 +294,11 @@ export function SuggestionPanel({
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">{renderContent()}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{renderContent()}</div>
 
-      <div className="border-t border-oak-variant bg-sepia-high p-3">
+      <div className="shrink-0 border-t border-outline-variant bg-parchment-bright px-5 py-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">
+          <span className="font-sans text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
             Alternatives: {alternatives.length ? activeIndex + 1 : 0} of {alternatives.length}
           </span>
           <div className="flex gap-1">
@@ -231,7 +306,7 @@ export function SuggestionPanel({
               type="button"
               onClick={() => setAlternative(activeIndex - 1)}
               disabled={busy || alternatives.length < 2}
-              className="p-1.5 rounded-sm border border-oak-variant text-ink-muted hover:text-ink disabled:opacity-40"
+              className="rounded-sm border border-oak-variant p-1.5 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
               aria-label="Previous alternative"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -240,7 +315,7 @@ export function SuggestionPanel({
               type="button"
               onClick={() => setAlternative(activeIndex + 1)}
               disabled={busy || alternatives.length < 2}
-              className="p-1.5 rounded-sm border border-oak-variant text-ink-muted hover:text-ink disabled:opacity-40"
+              className="rounded-sm border border-oak-variant p-1.5 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
               aria-label="Next alternative"
             >
               <ArrowRight className="h-4 w-4" />
@@ -248,28 +323,12 @@ export function SuggestionPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-2">
-          <button
-            type="button"
-            disabled={acceptDisabled}
-            onClick={() => activeAlternative && onAccept?.(activeAlternative)}
-            className="rounded-sm bg-primary px-2 py-2 font-sans text-[10px] uppercase tracking-widest text-parchment disabled:opacity-40"
-          >
-            Accept
-          </button>
-          <button
-            type="button"
-            disabled={rejectDisabled}
-            onClick={() => activeAlternative && onReject?.(activeAlternative)}
-            className="rounded-sm border border-oak-variant px-2 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink disabled:opacity-40"
-          >
-            Reject
-          </button>
+        <div className="flex justify-end gap-2">
           <button
             type="button"
             disabled={branchDisabled}
             onClick={() => activeAlternative && onBranch?.(activeAlternative)}
-            className="flex items-center justify-center rounded-sm border border-oak-variant px-2 py-2 text-ink-muted hover:text-ink disabled:opacity-40"
+            className="rounded-sm border border-oak-variant p-2 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
             aria-label="Branch suggestion"
             title="Branch"
           >
@@ -279,7 +338,7 @@ export function SuggestionPanel({
             type="button"
             disabled={noteDisabled}
             onClick={() => activeAlternative && onNote?.(activeAlternative)}
-            className="flex items-center justify-center rounded-sm border border-oak-variant px-2 py-2 text-ink-muted hover:text-ink disabled:opacity-40"
+            className="rounded-sm border border-oak-variant p-2 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
             aria-label="Add note"
             title="Note"
           >
@@ -289,11 +348,34 @@ export function SuggestionPanel({
             type="button"
             disabled={regenerateDisabled}
             onClick={onRegenerate}
-            className="flex items-center justify-center rounded-sm border border-oak-variant px-2 py-2 text-ink-muted hover:text-ink disabled:opacity-40"
+            className="rounded-sm border border-oak-variant p-2 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
             aria-label="Regenerate suggestion"
             title="Regenerate"
           >
             <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder="Ask for adjustment..."
+            className="min-w-0 flex-1 rounded-sm border border-oak-variant bg-surface-container-low px-3 py-2 font-sans text-xs text-ink outline-none focus:border-primary"
+          />
+          <button
+            type="button"
+            disabled={busy || !instruction.trim() || !onRegenerateWithInstruction}
+            onClick={() => {
+              const next = instruction.trim();
+              if (!next) return;
+              onRegenerateWithInstruction?.(next);
+              setInstruction('');
+            }}
+            className="rounded-sm border border-oak-variant p-2 text-ink-muted hover:bg-surface-container-high hover:text-ink disabled:opacity-40"
+            aria-label="Regenerate with instruction"
+            title="Regenerate with instruction"
+          >
+            <Send className="h-4 w-4" />
           </button>
         </div>
       </div>

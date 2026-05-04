@@ -127,8 +127,27 @@ export type StoryCanvasApiResult = {
   extraction_provider?: string;
 };
 
+export type MetricStats = {
+  count: number;
+  errors: number;
+  error_rate: number;
+  samples: number;
+  avg_ms: number;
+  max_ms: number;
+  p50_ms: number;
+  p90_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+};
+
+export type MetricsSnapshot = {
+  window_samples: number;
+  metrics: Record<string, MetricStats>;
+};
+
 export const api = {
   health: () => apiFetch<{ status: string }>('/api/health'),
+  metrics: () => apiFetch<MetricsSnapshot>('/api/metrics'),
   listProjects: () => apiFetch<Project[]>('/api/projects'),
   createProject: (body: { name: string; genres: string[]; target_words: number }) =>
     apiFetch<Project>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),

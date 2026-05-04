@@ -15,11 +15,12 @@ import {NavigationProps} from '../types';
 import {AppScaffold} from '../components/AppScaffold';
 import {useProjectStore} from '../stores/projectStore';
 import {ManuscriptEditor, type AutocompleteContext, type CommandScope, type InlineOperation, type InlinePreview, type ManuscriptEditorHandle} from '../components/ManuscriptEditor';
-import {SelectionToolbar, type Action} from '../components/SelectionToolbar';
 import {ContextInspector} from '../components/ContextInspector';
 import {SuggestionPanel, type SuggestionAlternative} from '../components/SuggestionPanel';
 import {api} from '../lib/api';
 import {COMMAND_PALETTE, getStorycraftCommand, isStorycraftCommandId, type CommandId, type StorycraftCommandId} from '../lib/writingCommands';
+
+type Action = CommandId | 'rephrase' | 'tone';
 
 export default function ZenEditor({onNavigate}: NavigationProps) {
   const editorRef = useRef<ManuscriptEditorHandle>(null);
@@ -43,8 +44,12 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     instruction?: string;
     contextPacket?: string;
     contextTokens?: number;
+    action?: Action;
+    style?: string;
+    scope?: CommandScope;
   } | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [lastSelection, setLastSelection] = useState({from: 0, to: 0, text: ''});
   const [pendingAction, setPendingAction] = useState<Action | null>(null);
   const [styleChoice, setStyleChoice] = useState('clearer');
@@ -250,6 +255,24 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     };
   };
 
+  const wordDeltaSummary = (original: string, proposed: string) => {
+    const originalWords = original.trim().split(/\s+/).filter(Boolean).length;
+    const proposedWords = proposed.trim().split(/\s+/).filter(Boolean).length;
+    const delta = proposedWords - originalWords;
+    if (!proposed.trim()) return '';
+    return `${originalWords} words → ${proposedWords} words · ${delta >= 0 ? '+' : ''}${delta} words`;
+  };
+
+  const showGeneratingPreview = (scope: CommandScope, operation: InlineOperation, task: string) => {
+    const preview = previewForOperation(operation, scope, '');
+    editorRef.current?.showInlinePreview({
+      ...preview,
+      status: 'generating',
+      task,
+    });
+    return preview;
+  };
+
   const runStorycraft = async (action: StorycraftCommandId, providedScope?: CommandScope) => {
     const handle = editorRef.current;
     if (!handle || !activeProject) return;
@@ -272,7 +295,9 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     if (!cfg) return;
     setAiBusy(true);
     setProposal(null);
+    setReviewOpen(false);
     setPendingAction(null);
+    showGeneratingPreview(scope, operation, cfg.label);
     try {
       const res = await api.storycraftRewrite(activeProject.id, {
         scene_id: activeSceneId,
@@ -284,7 +309,12 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       });
       const proposed = (res.rewrite || '').trim();
       const preview = previewForOperation(operation, scope, proposed);
-      handle.showInlinePreview(preview);
+      handle.showInlinePreview({
+        ...preview,
+        status: 'ready',
+        task: cfg.label,
+        summary: wordDeltaSummary(preview.original || text, proposed),
+      });
       const hint = [res.rewrite && `~${res.packet_meta.approx_tokens ?? 0} tok`].filter(Boolean).join(' ');
       setProposal({
         original: preview.original || text,
@@ -302,8 +332,11 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         task: cfg.label,
         contextPacket: undefined,
         contextTokens: res.packet_meta.approx_tokens,
+        action,
+        scope,
       });
     } catch (e) {
+      handle.clearInlinePreview();
       setProposal({
         original: text,
         proposed: '',
@@ -336,7 +369,9 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     const {task, instruction, role} = instructionFor(action, targetText, style, scope);
     setAiBusy(true);
     setProposal(null);
+    setReviewOpen(false);
     setPendingAction(null);
+    showGeneratingPreview(scope, operation, task);
     try {
       const res = await api.zenAi(activeProject.id, {
         scene_id: activeSceneId,
@@ -347,19 +382,28 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       });
       const opWithText = {...operation, text: res.text.trim()} as InlineOperation;
       const preview = previewForOperation(operation, scope, res.text.trim());
-      handle.showInlinePreview(preview);
+      handle.showInlinePreview({
+        ...preview,
+        status: 'ready',
+        task: action === 'expand' ? 'Suggested expansion' : `${task} ready`,
+        summary: wordDeltaSummary(preview.original || targetText, res.text.trim()),
+      });
       setProposal({
         original: preview.original || targetText,
         proposed: res.text.trim(),
         operation: opWithText,
         preview,
-        explanation: `Context ~${res.packet_meta.approx_tokens} tok, ${res.packet_meta.chunks_used} chunks`,
+        explanation: 'Uses current scene context',
         task,
         instruction,
         contextPacket: res.context_packet?.markdown,
         contextTokens: res.context_packet?.approx_tokens ?? res.packet_meta.approx_tokens,
+        action,
+        style,
+        scope,
       });
     } catch (e) {
+      handle.clearInlinePreview();
       setProposal({
         original: targetText,
         proposed: '',
@@ -368,20 +412,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     } finally {
       setAiBusy(false);
     }
-  };
-
-  const handleToolbarAction = (action: Action) => {
-    if (action === 'rephrase' || action === 'rewrite' || action === 'tone' || action === 'custom') {
-      editorRef.current?.clearGhostText();
-      setPendingAction(action);
-      setProposal(null);
-      return;
-    }
-    if (isStorycraftCommandId(action)) {
-      void runStorycraft(action);
-      return;
-    }
-    void runAi(action);
   };
 
   const handleInlineCommand = (commandId: CommandId, scope: CommandScope, freeform?: string) => {
@@ -452,6 +482,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
     setProposal(null);
     setContextOpen(false);
+    setReviewOpen(false);
   };
 
   const acceptProposalInsertBelow = async () => {
@@ -459,6 +490,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     editorRef.current?.applyOperation({operation: 'expand_choice', text: proposal.proposed, choice: 'insert_below'});
     setProposal(null);
     setContextOpen(false);
+    setReviewOpen(false);
   };
 
   const rejectProposal = async () => {
@@ -480,18 +512,29 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     editorRef.current?.clearInlinePreview();
     setProposal(null);
     setContextOpen(false);
+    setReviewOpen(false);
   };
 
-  const handlePreviewAction = (action: 'accept' | 'reject' | 'insert_below') => {
-    if (action === 'accept') {
+  const handleInlinePreviewAction = (action: 'apply' | 'dismiss' | 'review' | 'regenerate') => {
+    if (action === 'apply') {
       void acceptProposal();
       return;
     }
-    if (action === 'insert_below') {
-      void acceptProposalInsertBelow();
+    if (action === 'dismiss') {
+      void rejectProposal();
       return;
     }
-    void rejectProposal();
+    if (action === 'review') {
+      setReviewOpen(true);
+      return;
+    }
+    if (action === 'regenerate' && proposal?.action) {
+      if (proposal.action !== 'tone' && proposal.action !== 'rephrase' && isStorycraftCommandId(proposal.action)) {
+        void runStorycraft(proposal.action, proposal.scope);
+      } else {
+        void runAi(proposal.action, proposal.style, proposal.scope);
+      }
+    }
   };
 
   const handleDeleteScene = async (sceneId: string, title: string) => {
@@ -526,6 +569,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         explanation: proposal.explanation,
       }
     : null;
+  const suggestionRailOpen = Boolean(suggestionAlternative) && reviewOpen && !zenFocus;
   const formatLastSaved = (d: Date | null) => {
     if (!d) return '—';
     const s = d.getTime() / 1000;
@@ -895,7 +939,9 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
 
         <main
           ref={mainScrollRef}
-          className="zen-editor-main flex min-w-0 flex-1 items-start justify-center overflow-y-auto relative"
+          className={`zen-editor-main flex min-w-0 flex-1 items-start justify-center overflow-y-auto relative transition-[padding] duration-200 ${
+            suggestionRailOpen ? 'xl:pr-[424px]' : ''
+          }`}
         >
           <div className="manuscript-page w-full shrink-0 bg-parchment-bright shadow-xl relative paper-stack">
             <header className="mb-8 text-center">
@@ -903,7 +949,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
                 {activeChapter?.title ?? 'Chapter'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
-                <h1 className="text-3xl font-semibold italic text-primary m-0">
+                <h1 className="text-2xl sm:text-[1.65rem] font-semibold italic text-primary m-0 leading-tight">
                   {outline?.scenes.find((s) => s.id === activeSceneId)?.title ?? 'Scene'}
                 </h1>
                 <span
@@ -915,8 +961,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               </div>
               <div className="w-16 h-px bg-oak-variant mx-auto mb-6" />
             </header>
-
-            <SelectionToolbar disabled={aiBusy} onAction={handleToolbarAction} />
 
             {pendingAction ? (
               <div className="my-4 rounded-sm border border-oak-variant bg-sepia-high p-4">
@@ -991,7 +1035,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               memoryTerms={memoryTerms}
               commands={COMMAND_PALETTE}
               onCommand={handleInlineCommand}
-              onPreviewAction={handlePreviewAction}
               onEntityClick={(label) => setEntityCard(label)}
               onSaved={() => {
                 setLastSavedAt(new Date());
@@ -1000,6 +1043,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               }}
               onStats={setWordCount}
               onAutocompleteContext={(context) => void requestAutocomplete(context)}
+              onInlinePreviewAction={handleInlinePreviewAction}
             />
 
             {proposal && !proposal.proposed ? <p className="mt-4 text-sm text-amber-200/90 font-sans">{proposal.explanation}</p> : null}
@@ -1057,18 +1101,32 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
         </div>
       ) : null}
 
-      {suggestionAlternative ? (
+      {suggestionAlternative && reviewOpen ? (
         <SuggestionPanel
-          actionLabel={proposal?.task ?? 'AI suggestion'}
-          contextBreadcrumb={`${activeChapter?.title ?? 'Chapter'} · ${activeScene?.title ?? 'Scene'} · Selection: ${lastSelection.text.trim().split(/\s+/).filter(Boolean).length} words`}
+          actionLabel={proposal?.task?.toLowerCase().includes('expand') ? 'Suggested expansion' : 'Suggestion ready'}
+          contextBreadcrumb={`${activeChapter?.title ?? 'Chapter'} · ${activeScene?.title ?? 'Scene'} · ${wordDeltaSummary(proposal?.original ?? '', proposal?.proposed ?? '')} · Uses current scene context`}
           originalText={proposal?.original ?? ''}
           alternatives={[suggestionAlternative]}
+          defaultView="suggestion"
           busy={aiBusy}
           unsupportedActions={['branch', 'note']}
+          showInsertBelow={Boolean(proposal?.preview?.showInsertBelow)}
+          acceptLabel={proposal?.preview?.showInsertBelow ? 'Replace selected text' : 'Replace selected text'}
+          rejectLabel="Keep original"
           onAccept={() => void acceptProposal()}
           onReject={() => void rejectProposal()}
+          onInsertBelow={() => void acceptProposalInsertBelow()}
+          onRegenerate={() => {
+            if (!proposal?.action) return;
+            if (proposal.action !== 'tone' && proposal.action !== 'rephrase' && isStorycraftCommandId(proposal.action)) {
+              void runStorycraft(proposal.action, proposal.scope);
+            } else {
+              void runAi(proposal.action, proposal.style, proposal.scope);
+            }
+          }}
+          onRegenerateWithInstruction={(instruction) => void runAi('custom', instruction, proposal?.scope, instruction)}
           onClose={() => {
-            setProposal(null);
+            setReviewOpen(false);
             setContextOpen(false);
           }}
           onShowContextInspector={() => setContextOpen(true)}
@@ -1076,7 +1134,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       ) : null}
 
       {contextOpen && proposal ? (
-        <div className="fixed right-[380px] top-10 bottom-8 z-40 w-[560px] max-w-[calc(100vw-390px)]">
+        <div className="fixed right-[412px] top-24 bottom-8 z-40 w-[560px] max-w-[calc(100vw-432px)] sm:top-12">
           <ContextInspector
             className="h-full"
             subtitle={`for: ${proposal.task ?? 'AI suggestion'}`}
