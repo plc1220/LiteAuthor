@@ -95,7 +95,7 @@ export type CanvasEdge = {
   metadata: Record<string, unknown>;
 };
 
-export type StoryCanvas = {
+export type Canvas = {
   version: string;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
@@ -112,8 +112,8 @@ export type CaptureProposal = {
   metadata: Record<string, unknown>;
 };
 
-export type StoryCanvasApiResult = {
-  canvas?: StoryCanvas;
+export type CanvasApiResult = {
+  canvas?: Canvas;
   proposals?: CaptureProposal[];
   artifacts?: unknown[];
   hints?: unknown[];
@@ -163,9 +163,9 @@ export const api = {
   outline: (projectId: string) =>
     apiFetch<{ chapters: Chapter[]; scenes: Scene[] }>(`/api/projects/${projectId}/manuscript/outline`),
   getSceneContent: (projectId: string, sceneId: string) =>
-    apiFetch<{ markdown: string }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}/content`),
+    apiFetch<{ markdown: string; updated_at: string }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}/content`),
   putSceneContent: (projectId: string, sceneId: string, markdown: string) =>
-    apiFetch<{ ok: boolean }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}/content`, {
+    apiFetch<{ ok: boolean; updated_at?: string }>(`/api/projects/${projectId}/manuscript/scenes/${sceneId}/content`, {
       method: 'PUT',
       body: JSON.stringify({ markdown }),
     }),
@@ -268,33 +268,46 @@ export const api = {
       has_conflict: boolean;
       scene_id: string | null;
     }>(`/api/projects/${projectId}/timeline/events/${eventId}`, {method: 'PATCH', body: JSON.stringify(body)}),
-  getCanvas: (projectId: string) => apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`),
-  putCanvas: (projectId: string, canvas: StoryCanvas) =>
-    apiFetch<StoryCanvas>(`/api/projects/${projectId}/canvas`, {
+  getCanvas: (projectId: string) => apiFetch<Canvas>(`/api/projects/${projectId}/canvas`),
+  putCanvas: (projectId: string, canvas: Canvas) =>
+    apiFetch<Canvas>(`/api/projects/${projectId}/canvas`, {
       method: 'PUT',
       body: JSON.stringify(canvas),
     }),
   canvasAnalyze: (projectId: string, body: {title?: string; text: string; [key: string]: unknown}) =>
-    apiFetch<StoryCanvasApiResult>(
+    apiFetch<CanvasApiResult>(
       `/api/projects/${projectId}/canvas/analyze`,
       {
         method: 'POST',
         body: JSON.stringify({title: body.title ?? 'Artifact', ...body}),
       },
     ),
-  canvasAutosort: (projectId: string, body: {canvas?: StoryCanvas; mode: string; [key: string]: unknown}) =>
-    apiFetch<StoryCanvasApiResult>(`/api/projects/${projectId}/canvas/autosort`, {
+  canvasAutosort: (projectId: string, body: {canvas?: Canvas; mode: string; [key: string]: unknown}) =>
+    apiFetch<CanvasApiResult>(`/api/projects/${projectId}/canvas/autosort`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
   canvasCapture: (projectId: string, body: {proposals?: CaptureProposal[]; apply?: boolean; [key: string]: unknown}) =>
-    apiFetch<StoryCanvasApiResult>(
+    apiFetch<CanvasApiResult>(
       `/api/projects/${projectId}/canvas/capture`,
       {
         method: 'POST',
         body: JSON.stringify(body),
       },
     ),
+  wikiPopulate: (
+    projectId: string,
+    body: {source: 'manuscript' | 'canvas' | 'text'; scene_id?: string; title?: string; text?: string; canvas?: Canvas},
+  ) =>
+    apiFetch<{proposals: CaptureProposal[]; summary?: string}>(`/api/projects/${projectId}/wiki/populate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  wikiApply: (projectId: string, body: {proposals: CaptureProposal[]; apply: boolean}) =>
+    apiFetch<CanvasApiResult>(`/api/projects/${projectId}/wiki/populate/apply`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   zenAi: (
     projectId: string,
     body: {

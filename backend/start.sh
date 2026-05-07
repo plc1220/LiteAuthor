@@ -10,7 +10,21 @@ set -euo pipefail
 # Requires: Python 3.11+
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${SCRIPT_DIR}"
+
+agent_extra_for_provider() {
+  case "${LITEAUTHOR_LLM_PROVIDER:-google_genai}" in
+    mlx|MLX) echo mlx ;;
+    *) echo gemini ;;
+  esac
+}
+
+install_local_agent() {
+  local extra
+  extra="$(agent_extra_for_provider)"
+  .venv/bin/python -m pip install -e "${ROOT_DIR}/agent[${extra}]"
+}
 
 if [ -f ".env" ]; then
   set -a
@@ -46,6 +60,7 @@ if [ ! -d ".venv" ]; then
   "${PYTHON_BIN}" -m venv .venv
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements.txt
+  install_local_agent
 fi
 
 if ! .venv/bin/python - <<'PY' >/dev/null 2>&1
@@ -64,6 +79,7 @@ then
   echo "Installing backend dependencies for ${LITEAUTHOR_LLM_PROVIDER:-google_genai} ..."
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements.txt
+  install_local_agent
 fi
 
 # Activate the venv

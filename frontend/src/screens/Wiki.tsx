@@ -5,7 +5,7 @@ import {AppScaffold} from '../components/AppScaffold';
 import {useProjectStore} from '../stores/projectStore';
 import {api} from '../lib/api';
 import {MotifTrackerPanel, MOTIFS_WIKI_PATH} from '../components/MotifTrackerPanel';
-import {takeStoryBibleOpen} from '../lib/storyBibleOpen';
+import {takeWikiOpen} from '../lib/wikiOpen';
 
 function noteLabel(path: string) {
   return path.replace(/^story\//, '').replace(/\.md$/i, '');
@@ -13,7 +13,7 @@ function noteLabel(path: string) {
 
 type Center = {kind: 'motifs'} | {kind: 'file'; path: string; content: string} | {kind: 'empty'};
 
-export default function StoryBible({onNavigate}: NavigationProps) {
+export default function Wiki({onNavigate}: NavigationProps) {
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const selectProject = useProjectStore((s) => s.selectProject);
@@ -75,7 +75,7 @@ export default function StoryBible({onNavigate}: NavigationProps) {
     hasInitialized.current = true;
 
     void (async () => {
-      const hint = takeStoryBibleOpen();
+      const hint = takeWikiOpen();
       if (hint?.view === 'motifs') {
         setCenter({kind: 'motifs'});
         return;
@@ -190,16 +190,16 @@ export default function StoryBible({onNavigate}: NavigationProps) {
 
       {!activeProject ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <p className="font-serif text-lg italic text-ink">Choose a project to open the Story Bible.</p>
-          <button type="button" className="rounded-sm bg-primary px-4 py-2 font-sans text-xs uppercase text-parchment" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            Back to the Codex
+          <p className="font-serif text-lg italic text-ink">Choose a project to open the Wiki.</p>
+          <button type="button" className="rounded-sm bg-primary px-4 py-2 font-sans text-xs uppercase text-parchment" onClick={() => onNavigate('WikiHub', 'push_back')}>
+            Back to the Wiki
           </button>
         </div>
       ) : (
         <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col gap-0 lg:flex-row">
           <aside className="w-full shrink-0 border-b border-oak-variant bg-sepia-low/60 lg:w-56 lg:border-b-0 lg:border-r">
             <div className="p-4">
-              <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Story Bible</p>
+              <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Wiki</p>
               <h1 className="mt-1 font-serif text-xl italic text-primary">Canon</h1>
               <p className="mt-2 text-xs leading-relaxed text-ink-muted/90">Characters, places, world rules, motifs, and unresolved questions the editor can remember.</p>
             </div>
@@ -246,9 +246,9 @@ export default function StoryBible({onNavigate}: NavigationProps) {
               <button
                 type="button"
                 className="w-full rounded-sm border border-dashed border-oak-variant py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-                onClick={() => onNavigate('StoryWikiHub', 'push_back')}
+                onClick={() => onNavigate('WikiHub', 'push_back')}
               >
-                The Codex
+                Wiki
               </button>
             </div>
           </aside>

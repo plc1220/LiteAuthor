@@ -38,9 +38,9 @@ export default function AgentMode({onNavigate}: NavigationProps) {
   if (!activeProject) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-parchment text-ink gap-4 px-6 text-center">
-        <p className="font-serif text-lg italic">Select a project from the Codex.</p>
-        <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm border-none cursor-pointer" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-          The Codex
+        <p className="font-serif text-lg italic">Select a project from the Wiki.</p>
+        <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm border-none cursor-pointer" onClick={() => onNavigate('WikiHub', 'push_back')}>
+          Wiki
         </button>
       </div>
     );
@@ -55,8 +55,8 @@ export default function AgentMode({onNavigate}: NavigationProps) {
         <div className="flex items-center gap-8">
           <span className="italic text-xl font-bold">LiteAuthor</span>
           <nav className="flex gap-4">
-            <button type="button" className="text-ink-muted hover:text-primary transition-colors cursor-pointer bg-transparent border-none font-inherit" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-              The Codex
+            <button type="button" className="text-ink-muted hover:text-primary transition-colors cursor-pointer bg-transparent border-none font-inherit" onClick={() => onNavigate('WikiHub', 'push_back')}>
+              Wiki
             </button>
             <span className="text-primary border-b border-primary pb-0.5">Agent</span>
           </nav>

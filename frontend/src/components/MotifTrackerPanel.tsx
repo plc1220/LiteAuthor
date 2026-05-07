@@ -60,7 +60,7 @@ type MotifTrackerPanelProps = {
 };
 
 /**
- * Tracked-recurrence panel for `story/motifs.md` — lives inside Story Bible, not a standalone “room.”
+ * Tracked-recurrence panel for `story/motifs.md` — lives inside Wiki, not a standalone “room.”
  */
 export function MotifTrackerPanel({onNavigate}: MotifTrackerPanelProps) {
   const activeProject = useProjectStore((s) => s.activeProject);

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -72,7 +73,10 @@ def get_scene_content(project_id: str, scene_id: str):
         if not path.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("", encoding="utf-8")
-        return {"markdown": path.read_text(encoding="utf-8")}
+        text = path.read_text(encoding="utf-8")
+        mtime = path.stat().st_mtime
+        updated_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+        return {"markdown": text, "updated_at": updated_at}
     finally:
         conn.close()
 
@@ -89,7 +93,9 @@ def put_scene_content(project_id: str, scene_id: str, body: SceneContentUpdate):
         path = _safe_project_path(root, rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body.markdown, encoding="utf-8")
-        return {"ok": True}
+        mtime = path.stat().st_mtime
+        updated_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+        return {"ok": True, "updated_at": updated_at}
     finally:
         conn.close()
 

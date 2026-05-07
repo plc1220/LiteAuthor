@@ -103,8 +103,8 @@ export default function VersionHistory({onNavigate}: NavigationProps) {
       <div className="flex h-screen items-center justify-center bg-parchment text-ink px-6 text-center">
         <div>
           <p className="font-serif text-lg italic mb-4">Select a project before opening version history.</p>
-          <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('StoryWikiHub', 'push_back')}>
-            The Codex
+          <button type="button" className="font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm" onClick={() => onNavigate('WikiHub', 'push_back')}>
+            Wiki
           </button>
         </div>
       </div>

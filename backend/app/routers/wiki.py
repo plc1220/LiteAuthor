@@ -2,8 +2,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..database import get_project_root
-from ..schemas import WikiFileOut, WikiWrite
+from ..database import connect_project_db, get_project_root
+from ..schemas import CaptureProposal, WikiApplyRequest, WikiPopulateRequest, WikiFileOut, WikiWrite
+from ..wiki_flow import apply_timeline, apply_wiki, proposals_from_canvas_nodes, proposals_from_manuscript_scene, wiki_proposal
 
 router = APIRouter(prefix="/api/projects/{project_id}/wiki", tags=["wiki"])
 
@@ -79,6 +80,59 @@ def wiki_put_file(project_id: str, path: str, body: WikiWrite):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(body.content, encoding="utf-8")
     return {"ok": True}
+
+
+@router.post("/populate")
+def wiki_populate(project_id: str, body: WikiPopulateRequest):
+    root = _root(project_id)
+    proposals: list[dict] = []
+    if body.source == "canvas":
+        nodes = [node.model_dump() for node in (body.canvas.nodes if body.canvas else [])]
+        proposals = proposals_from_canvas_nodes(root, nodes)
+    elif body.source == "manuscript":
+        if not body.scene_id:
+            raise HTTPException(400, "scene_id is required for manuscript source")
+        conn = connect_project_db(root)
+        try:
+            row = conn.execute("SELECT title, file_rel_path FROM scenes WHERE id = ?", (body.scene_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Scene not found")
+            path = (root / row["file_rel_path"]).resolve()
+            path.relative_to(root.resolve())
+            text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+            proposals = proposals_from_manuscript_scene(root, body.scene_id, text, row["title"])
+        finally:
+            conn.close()
+    else:
+        text = (body.text or "").strip()
+        if not text:
+            raise HTTPException(400, "text is required")
+        proposal = wiki_proposal(root, source=body.source or "text", source_id="", kind="Worldbuilding", title=body.title or "Story note", body=text)
+        proposals = [proposal] if proposal else []
+
+    return {
+        "proposals": proposals,
+        "summary": f"{len(proposals)} Wiki update proposal(s).",
+    }
+
+
+@router.post("/populate/apply")
+def wiki_populate_apply(project_id: str, body: WikiApplyRequest):
+    root = _root(project_id)
+    if not body.apply:
+        return {"applied": False, "proposals": [proposal.model_dump() for proposal in body.proposals]}
+    items: list[dict[str, str]] = []
+    for proposal in body.proposals:
+        try:
+            if proposal.kind == "wiki":
+                items.append(apply_wiki(root, proposal))
+            elif proposal.kind == "timeline_event":
+                items.append(apply_timeline(root, proposal))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    applied = sum(1 for item in items if item.get("status") == "applied")
+    skipped = sum(1 for item in items if item.get("status") == "skipped")
+    return {"applied": True, "items": items, "summary": f"{applied} applied · {skipped} skipped"}
 
 
 @router.post("/characters")

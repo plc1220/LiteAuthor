@@ -1,12 +1,12 @@
 import type {ReactNode} from 'react';
-import {BookOpen, Home, Library, Settings} from 'lucide-react';
+import {BookOpen, Home, Library} from 'lucide-react';
 import type {NavigationProps, Screen} from '../types';
 
 type SecondaryPageNavProps = {
   eyebrow: string;
   title: string;
   projectName?: string;
-  active?: 'manuscript' | 'wiki' | 'settings';
+  active?: 'manuscript' | 'wiki';
   actions?: ReactNode;
   onNavigate: NavigationProps['onNavigate'];
 };
@@ -14,8 +14,7 @@ type SecondaryPageNavProps = {
 export function SecondaryPageNav({eyebrow, title, projectName, active, actions, onNavigate}: SecondaryPageNavProps) {
   const navItems: {label: string; screen: Screen; icon: ReactNode; key: NonNullable<SecondaryPageNavProps['active']>}[] = [
     {label: 'Manuscript', screen: 'ZenEditor', icon: <BookOpen className="w-4 h-4" />, key: 'manuscript'},
-    {label: 'The Codex', screen: 'StoryWikiHub', icon: <Library className="w-4 h-4" />, key: 'wiki'},
-    {label: 'Settings', screen: 'SettingsScreen', icon: <Settings className="w-4 h-4" />, key: 'settings'},
+    {label: 'Wiki', screen: 'WikiHub', icon: <Library className="w-4 h-4" />, key: 'wiki'},
   ];
 
   return (

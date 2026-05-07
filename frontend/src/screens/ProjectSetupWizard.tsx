@@ -101,7 +101,7 @@ function describeAxis(value: number, low: string, balanced: string, high: string
 export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
   const createProject = useProjectStore((s) => s.createProject);
   const activeProject = useProjectStore((s) => s.activeProject);
-  const exitTarget = activeProject ? 'StoryWikiHub' : 'LibraryHome';
+  const exitTarget = activeProject ? 'WikiHub' : 'LibraryHome';
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
@@ -521,7 +521,7 @@ export default function ProjectSetupWizard({onNavigate}: NavigationProps) {
             className="w-full flex items-center justify-between gap-3 bg-transparent border-none p-0 text-left cursor-pointer"
             onClick={() => setFileTreeOpen((open) => !open)}
           >
-            <h3 className="font-sans text-[10px] text-oak uppercase font-bold tracking-widest">Planned Story Files</h3>
+            <h3 className="font-sans text-[10px] text-oak uppercase font-bold tracking-widest">Planned Wiki Files</h3>
             <ChevronDown className={`w-4 h-4 text-oak transition-transform ${fileTreeOpen ? '' : '-rotate-90'}`} />
           </button>
           {fileTreeOpen ? (

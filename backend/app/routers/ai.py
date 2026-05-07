@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, HTTPException
 from liteauthor_agent.context_engine.builder import build_scene_packet
@@ -14,29 +15,39 @@ router = APIRouter(prefix="/api/projects/{project_id}/ai", tags=["ai"])
 
 
 def _clean_inline_completion(text: str) -> str:
-    cleaned = text.strip().strip('"')
-    cleaned = cleaned.split("\n", 1)[0]
+    cleaned = text.strip().strip('"').strip()
+    cleaned = re.sub(r"<[^>\n]+>", "", cleaned).strip()
+    for prefix in ("Continuation:", "Continue:", "Autocomplete:", "Assistant:", "Response:"):
+        if cleaned.lower().startswith(prefix.lower()):
+            cleaned = cleaned[len(prefix) :].strip()
+            break
+    cleaned = cleaned.split("\n", 1)[0].strip().strip('"')
+    if not cleaned or re.fullmatch(r"[\W_]+", cleaned):
+        return ""
     return cleaned[:80].rstrip()
 
 
 def _autocomplete_prompt(body: AutocompleteRequest) -> str:
     style = body.documentMemory.strip() or "Continue naturally in the same prose style."
     parts = [
-        "<STYLE>",
-        style,
-        "</STYLE>",
+        "You are an inline autocomplete engine for a manuscript editor.",
+        "Return only the next few words to insert at the cursor.",
+        "Do not repeat labels, quote the prompt, explain, or add a newline.",
+        "",
+        f"Style/context: {style}",
     ]
     if body.previousParagraph.strip():
-        parts.extend(["<PREVIOUS>", body.previousParagraph.strip(), "</PREVIOUS>"])
+        parts.extend(["", f"Previous paragraph: {body.previousParagraph.strip()}"])
     parts.extend(
         [
-            "<BEFORE>",
+            "",
+            "Text before cursor:",
             body.before.strip(),
-            "</BEFORE>",
-            "<AFTER>",
+            "",
+            "Text after cursor:",
             body.after.strip(),
-            "</AFTER>",
-            "<CONTINUE>",
+            "",
+            "Autocomplete continuation:",
         ],
     )
     return "\n".join(parts)

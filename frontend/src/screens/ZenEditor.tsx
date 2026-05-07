@@ -1,13 +1,13 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   BookOpen,
+  BookMarked,
   Brain,
   Download,
   History,
   Pencil,
   Settings,
   Edit3,
-  Save,
   Layers,
   Trash2,
 } from 'lucide-react';
@@ -17,10 +17,17 @@ import {useProjectStore} from '../stores/projectStore';
 import {ManuscriptEditor, type AutocompleteContext, type CommandScope, type InlineOperation, type InlinePreview, type ManuscriptEditorHandle} from '../components/ManuscriptEditor';
 import {ContextInspector} from '../components/ContextInspector';
 import {SuggestionPanel, type SuggestionAlternative} from '../components/SuggestionPanel';
-import {api} from '../lib/api';
+import LumoPet from '../components/LumoPet';
+import {api, type CaptureProposal} from '../lib/api';
 import {COMMAND_PALETTE, getStorycraftCommand, isStorycraftCommandId, type CommandId, type StorycraftCommandId} from '../lib/writingCommands';
 
 type Action = CommandId | 'rephrase' | 'tone';
+
+function proposalKindLabel(kind: string) {
+  if (kind === 'timeline_event') return 'Timeline';
+  if (kind === 'wiki') return 'Wiki';
+  return kind.replace(/_/g, ' ');
+}
 
 export default function ZenEditor({onNavigate}: NavigationProps) {
   const editorRef = useRef<ManuscriptEditorHandle>(null);
@@ -58,6 +65,11 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
   const [zenFocus, setZenFocus] = useState(() => localStorage.getItem('liteauthor.editor.zenFocus') === 'true');
   const [memoryTerms, setMemoryTerms] = useState<string[]>([]);
   const [entityCard, setEntityCard] = useState<string | null>(null);
+  const [wikiProposals, setWikiProposals] = useState<CaptureProposal[]>([]);
+  const [selectedWikiProposalIds, setSelectedWikiProposalIds] = useState<Set<string>>(() => new Set());
+  const [wikiPopulateOpen, setWikiPopulateOpen] = useState(false);
+  const [wikiPopulateBusy, setWikiPopulateBusy] = useState(false);
+  const [wikiPopulateStatus, setWikiPopulateStatus] = useState('');
   const [renaming, setRenaming] = useState<{
     kind: 'chapter' | 'scene';
     id: string;
@@ -112,6 +124,11 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [zenFocus]);
+
+  const selectedWikiProposals = useMemo(
+    () => wikiProposals.filter((proposal) => selectedWikiProposalIds.has(proposal.id)),
+    [wikiProposals, selectedWikiProposalIds],
+  );
 
   if (!activeProject || !activeSceneId) {
     return (
@@ -644,6 +661,45 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
     }
   };
 
+  const reviewWikiUpdates = async () => {
+    if (!activeProject || !activeSceneId) return;
+    setWikiPopulateBusy(true);
+    setWikiPopulateOpen(true);
+    setWikiPopulateStatus('Reading current scene...');
+    try {
+      await flushBeforeNav();
+      const result = await api.wikiPopulate(activeProject.id, {source: 'manuscript', scene_id: activeSceneId});
+      setWikiProposals(result.proposals);
+      setSelectedWikiProposalIds(new Set(result.proposals.map((item) => item.id)));
+      setWikiPopulateStatus(result.summary ?? `${result.proposals.length} update proposal(s).`);
+    } catch (error) {
+      setWikiPopulateStatus((error as Error).message);
+    } finally {
+      setWikiPopulateBusy(false);
+    }
+  };
+
+  const applyWikiUpdates = async () => {
+    if (!activeProject || selectedWikiProposals.length === 0) return;
+    setWikiPopulateBusy(true);
+    setWikiPopulateStatus('Applying...');
+    try {
+      const result = await api.wikiApply(activeProject.id, {proposals: selectedWikiProposals, apply: true});
+      setWikiPopulateStatus(result.summary ?? `Applied ${selectedWikiProposals.length} update(s).`);
+      setWikiProposals((current) => current.filter((proposal) => !selectedWikiProposalIds.has(proposal.id)));
+      setSelectedWikiProposalIds(new Set());
+      const tree = await api.wikiTree(activeProject.id);
+      const terms = tree
+        .filter((e) => /\/(characters|locations)\/[^/]+\.md$/i.test(e.path))
+        .map((e) => e.path.replace(/.*\//, '').replace(/\.md$/, '').replace(/[-_]+/g, ' ').trim());
+      setMemoryTerms([...new Set(terms)].filter((s) => s.length >= 2).slice(0, 50));
+    } catch (error) {
+      setWikiPopulateStatus((error as Error).message);
+    } finally {
+      setWikiPopulateBusy(false);
+    }
+  };
+
   return (
     <AppScaffold
       active="manuscript"
@@ -651,12 +707,18 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       beforeNavigate={flushBeforeNav}
       minimalChrome={zenFocus}
       mainClassName="overflow-hidden"
-      actions={
+        actions={
         <>
-          <div className="hidden max-w-[10rem] flex-col text-right font-sans text-[10px] leading-tight text-ink-muted sm:flex" title="Latest successful save to disk">
-            <span className="uppercase tracking-widest">Last saved</span>
-            <span className="font-sans text-xs text-ink">{formatLastSaved(lastSavedAt)}</span>
-          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-mid px-2.5 py-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink disabled:opacity-50"
+            onClick={() => void reviewWikiUpdates()}
+            disabled={wikiPopulateBusy}
+            title="Find Wiki updates from the current scene"
+          >
+            <BookMarked className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Wiki</span>
+          </button>
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-mid px-2.5 py-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
@@ -678,7 +740,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
             Studio zen
             <span className="h-1.5 w-1.5 rounded-full bg-amber-wax" aria-hidden />
           </button>
-          <span className="hidden text-ink-muted text-xs sm:inline">{wordCount.toLocaleString()} words</span>
           <button
             type="button"
             className="p-2 hover:bg-sepia-high rounded-sm"
@@ -700,12 +761,22 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               <span>{savedPulse ? 'Saving...' : 'Saved'}</span>
             </div>
             <span className="text-oak">|</span>
-            <span className="flex items-center gap-1.5 min-w-0" title="Scene and story context are sent with each AI call">
+            <span className="flex items-center gap-1.5 min-w-0" title="Scene and wiki context are sent with each AI call">
               <Brain className="h-3.5 w-3.5 shrink-0" aria-hidden />
               <span className="truncate">Scene packet mode</span>
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <span
+              className="hidden font-sans text-[10px] uppercase tracking-widest text-ink-muted sm:inline"
+              title="Disk last modified (from server); updates after each save"
+            >
+              Last saved{' '}
+              <span className="font-bold text-primary">{formatLastSaved(lastSavedAt)}</span>
+            </span>
+            <span className="hidden text-oak sm:inline" aria-hidden>
+              |
+            </span>
             <span className="font-bold text-primary">Words: {wordCount.toLocaleString()}</span>
             {zenFocus ? <div className="rounded-sm bg-primary px-3 py-1 text-[9px] font-bold text-parchment">STUDIO ZEN</div> : null}
           </div>
@@ -715,7 +786,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
       {zenFocus ? (
         <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] flex items-start justify-end gap-2 p-3">
           <div className="pointer-events-auto flex max-w-sm flex-wrap items-center justify-end gap-2 rounded-sm border border-oak-variant/80 bg-sepia-high/95 px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink shadow-md backdrop-blur-sm">
-            <span className="text-ink-muted">Last: {formatLastSaved(lastSavedAt)}</span>
             <button
               type="button"
               onClick={() => void exportSceneMarkdown()}
@@ -732,11 +802,6 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               Exit zen
             </button>
           </div>
-        </div>
-      ) : null}
-      {zenFocus ? (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 font-sans text-[10px] uppercase tracking-widest text-ink-muted/90" aria-hidden>
-          {wordCount.toLocaleString()} words
         </div>
       ) : null}
       <div className="flex h-full min-h-0 overflow-hidden">
@@ -954,7 +1019,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
                 </h1>
                 <span
                   className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-oak-variant/50 bg-sepia-high/50 text-ink-muted"
-                  title="AI uses your scene and story context packet for each request (scene packet mode)"
+                  title="AI uses your scene and wiki context packet for each request (scene packet mode)"
                 >
                   <Brain className="h-3.5 w-3.5" aria-hidden />
                 </span>
@@ -1041,6 +1106,7 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
                 setSavedPulse(true);
                 setTimeout(() => setSavedPulse(false), 900);
               }}
+              onHydrated={({updatedAt}) => setLastSavedAt(new Date(updatedAt))}
               onStats={setWordCount}
               onAutocompleteContext={(context) => void requestAutocomplete(context)}
               onInlinePreviewAction={handleInlinePreviewAction}
@@ -1057,27 +1123,105 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
             </div>
           </div>
 
-          {zenFocus ? null : (
-            <button
-              type="button"
-              className="snapshot-button fixed bg-amber-wax text-parchment rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all z-40 border-4 border-white"
-              title="Snapshot"
-              onClick={() => void api.createSnapshot(activeProject.id, 'manual')}
-            >
-              <Save className="w-6 h-6" />
-            </button>
-          )}
         </main>
 
       </div>
+
+      <LumoPet
+        hidden={zenFocus}
+        manuscriptTitle={activeProject.name}
+        currentScene={activeScene?.title}
+        selectedText={lastSelection.text}
+        aiBusy={aiBusy}
+        hasSuggestion={Boolean(proposal?.proposed)}
+        onSnapshot={() => void api.createSnapshot(activeProject.id, 'manual')}
+      />
+
+      {wikiPopulateOpen ? (
+        <div className="fixed bottom-24 right-6 z-[72] w-[min(28rem,calc(100vw-2rem))] rounded-sm border border-oak-variant bg-parchment-bright p-4 text-ink shadow-xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">Wiki updates</p>
+              <h2 className="mt-1 font-serif text-lg italic text-primary">{wikiProposals.length} found</h2>
+            </div>
+            <button
+              type="button"
+              className="rounded-sm border border-oak-variant px-2 py-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
+              onClick={() => setWikiPopulateOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-ink-muted">{wikiPopulateStatus}</p>
+          {wikiProposals.length > 0 ? (
+            <>
+              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                {wikiProposals.map((item) => {
+                  const selected = selectedWikiProposalIds.has(item.id);
+                  return (
+                    <label key={item.id} className={`block cursor-pointer rounded-sm border p-2.5 ${selected ? 'border-primary/45 bg-sepia-highest' : 'border-oak-variant bg-sepia-low'}`}>
+                      <span className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+                          checked={selected}
+                          onChange={(event) => {
+                            setSelectedWikiProposalIds((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.add(item.id);
+                              else next.delete(item.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-sans text-[9px] font-bold uppercase tracking-widest text-primary">
+                            {proposalKindLabel(item.kind)} · {item.target}
+                          </span>
+                          <span className="mt-0.5 block text-sm font-semibold leading-snug text-ink">{item.title}</span>
+                          <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-ink-muted">{item.content.replace(/[#*_`<>-]/g, ' ').trim()}</span>
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-sm bg-primary px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-parchment disabled:opacity-50"
+                  onClick={() => void applyWikiUpdates()}
+                  disabled={wikiPopulateBusy || selectedWikiProposals.length === 0}
+                >
+                  {wikiPopulateBusy ? 'Working...' : `Apply ${selectedWikiProposals.length}`}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
+                  onClick={() => setSelectedWikiProposalIds(new Set(wikiProposals.map((item) => item.id)))}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="rounded-sm border border-oak-variant px-3 py-2 font-sans text-[10px] uppercase tracking-widest text-ink-muted hover:text-ink"
+                  onClick={() => setSelectedWikiProposalIds(new Set())}
+                >
+                  None
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {entityCard ? (
         <div
           className="fixed bottom-24 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 rounded-sm border border-oak-variant bg-surface-container-highest px-4 py-3 font-sans text-ink shadow-lg"
           role="dialog"
-          aria-label="Story memory"
+          aria-label="Wiki memory"
         >
-          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-muted">Story memory</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-muted">Wiki memory</p>
           <p className="mt-2 font-serif text-lg text-primary">{entityCard}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -1085,10 +1229,10 @@ export default function ZenEditor({onNavigate}: NavigationProps) {
               className="rounded-sm bg-primary px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-parchment"
               onClick={() => {
                 setEntityCard(null);
-                goScreen('StoryBible', 'push');
+                goScreen('Wiki', 'push');
               }}
             >
-              Open Story Bible
+              Open Wiki
             </button>
             <button
               type="button"

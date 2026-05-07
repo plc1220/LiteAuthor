@@ -9,7 +9,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from ..database import connect_project_db, get_project_root
-from ..schemas import CanvasAnalyzeRequest, CanvasAutosortRequest, CanvasCaptureRequest, CaptureProposal, StoryCanvas
+from ..schemas import CanvasAnalyzeRequest, CanvasAutosortRequest, CanvasCaptureRequest, CaptureProposal, Canvas
+from ..wiki_flow import apply_timeline, apply_wiki, proposals_from_canvas_nodes
 
 router = APIRouter(prefix="/api/projects/{project_id}/canvas", tags=["canvas"])
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ def _safe_slug(text: str, fallback: str = "item") -> str:
 
 
 def _empty_canvas() -> dict[str, Any]:
-    return {"version": "liteauthor.story-canvas.v1", "nodes": [], "edges": [], "metadata": {}}
+    return {"version": "liteauthor.canvas.v1", "nodes": [], "edges": [], "metadata": {}}
 
 
 def _split_chunks(text: str) -> list[tuple[str, str]]:
@@ -232,7 +233,7 @@ def _normalize_model_cards(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 async def _semantic_cards_bonsai(text: str) -> list[dict[str, Any]]:
     prompt = f"""
-Extract movable story-canvas cards from the pasted writing notes.
+Extract movable Canvas cards from the supplied writing source packet. It may contain typed notes, pasted text, file text, or attachment descriptions.
 
 Return JSON only, no markdown, matching this schema:
 {{
@@ -252,9 +253,9 @@ Rules:
 - Keep section labels as context; do not make cards like "这是一个关于：" unless they contain a complete idea.
 - Preserve the source language.
 - Prefer 4-10 strong cards over many weak cards.
-- Do not invent plot facts beyond the paste.
+- Do not invent plot facts beyond the source packet.
 
-PASTE:
+SOURCE PACKET:
 {text[:12000]}
 """.strip()
     from liteauthor_agent.llm_gateway.mlx_client import canvas_extraction_mlx_sync
@@ -515,7 +516,7 @@ def _autosort(canvas: dict[str, Any], mode: str) -> dict[str, Any]:
     return canvas
 
 
-@router.get("", response_model=StoryCanvas)
+@router.get("", response_model=Canvas)
 def get_canvas(project_id: str):
     root = _root(project_id)
     path = _canvas_path(root)
@@ -527,8 +528,8 @@ def get_canvas(project_id: str):
         raise HTTPException(400, "Canvas file is invalid JSON")
 
 
-@router.put("", response_model=StoryCanvas)
-def put_canvas(project_id: str, canvas: StoryCanvas):
+@router.put("", response_model=Canvas)
+def put_canvas(project_id: str, canvas: Canvas):
     root = _root(project_id)
     path = _canvas_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -652,7 +653,7 @@ async def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
 
     canvas = _autosort(
         {
-            "version": "liteauthor.story-canvas.v1",
+            "version": "liteauthor.canvas.v1",
             "nodes": nodes,
             "edges": edges,
             "metadata": {"source": "artifact-analyze", "extraction_provider": extraction_provider},
@@ -662,6 +663,7 @@ async def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
     _canvas_path(root).parent.mkdir(parents=True, exist_ok=True)
     _canvas_path(root).write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
     artifacts = _ui_artifacts(canvas)
+    proposals = proposals_from_canvas_nodes(root, canvas.get("nodes") or [])
     logger.info(
         "Canvas analyze project=%s extractor=%s cards=%s proposals=%s",
         project_id,
@@ -675,7 +677,7 @@ async def analyze_artifact(project_id: str, body: CanvasAnalyzeRequest):
         "artifacts": artifacts,
         "hints": _ui_hints(canvas),
         "summary": f"{len(artifacts)} cards · {len(proposals)} capture proposals · extractor: {extraction_provider}",
-        "capture": "Review cards on the board. In Updates, select proposals then Apply — Scene cards can add a manuscript chapter; other kinds update bible or timeline.",
+        "capture": "Review cards on the board. In Suggested updates, select proposals then Apply. Scene cards can add a manuscript chapter; other kinds update the wiki or timeline.",
         "extraction_provider": extraction_provider,
     }
 
@@ -725,9 +727,12 @@ def capture_canvas(project_id: str, body: dict[str, Any]):
     applied: list[dict[str, str]] = []
     for proposal in parsed.proposals:
         if proposal.kind == "wiki":
-            applied.append(_apply_wiki(root, proposal))
+            try:
+                applied.append(apply_wiki(root, proposal))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         elif proposal.kind == "timeline_event":
-            applied.append(_apply_timeline(root, proposal))
+            applied.append(apply_timeline(root, proposal))
         elif proposal.kind == "chapter":
             applied.append(_apply_chapter(root, proposal))
     return {"applied": True, "items": applied}

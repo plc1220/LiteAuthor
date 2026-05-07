@@ -157,7 +157,7 @@ export default function SettingsScreen({onNavigate}: NavigationProps) {
 
   const wikiSection = (
     <>
-      <Row label="Reference folder" detail="Local story reference folder for this project.">
+      <Row label="Wiki folder" detail="Local wiki reference folder for this project.">
         <input readOnly className="w-full max-w-xl bg-sepia-high border border-oak-variant p-2 rounded-sm text-xs font-mono text-ink-muted" value={wikiPath} />
       </Row>
       <Row label="Auto-suggest wiki updates" detail="Prompt after chapter completion."><Toggle checked={autoWiki} onChange={setAutoWiki} /></Row>

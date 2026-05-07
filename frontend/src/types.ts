@@ -1,8 +1,8 @@
 export type Screen =
   | 'LibraryHome'
-  | 'StoryWikiHub'
-  | 'StoryBible'
-  | 'StoryCanvas'
+  | 'WikiHub'
+  | 'Wiki'
+  | 'Canvas'
   | 'TimelineView'
   | 'AgentMode'
   | 'ZenEditor'

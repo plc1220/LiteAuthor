@@ -1,27 +1,26 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import type {PointerEvent, WheelEvent} from 'react';
+import type {ChangeEvent, DragEvent, PointerEvent, WheelEvent} from 'react';
 import {
   BookOpen,
   CheckCircle2,
   ClipboardPaste,
-  Clock3,
+  FileText,
   Home,
   Layers3,
   Link2,
   Maximize2,
   Minus,
   Move,
+  Paperclip,
   Plus,
   ScanSearch,
   StickyNote,
   Trash2,
-  TriangleAlert,
-  WandSparkles,
 } from 'lucide-react';
 import {NavigationProps} from '../types';
 import {useProjectStore} from '../stores/projectStore';
 import {api} from '../lib/api';
-import type {CanvasNode, CaptureProposal, StoryCanvas as StoryCanvasData} from '../lib/api';
+import type {CanvasNode, CaptureProposal, Canvas as CanvasData} from '../lib/api';
 
 type SortMode = 'semantic' | 'chronological' | 'density';
 type ArtifactKind = 'scene' | 'beat' | 'thread' | 'question' | 'promise' | 'note';
@@ -56,7 +55,7 @@ type CanvasAnalysis = {
 };
 
 type CanvasApiResult = Partial<CanvasAnalysis> & {
-  canvas?: StoryCanvasData;
+  canvas?: CanvasData;
   artifacts?: Array<Partial<CanvasArtifact> | Record<string, unknown>>;
   hints?: Array<Partial<CanvasHint> | Record<string, unknown>>;
   semantic_hints?: Array<Partial<CanvasHint> | Record<string, unknown>>;
@@ -77,7 +76,7 @@ type CanvasApiClient = typeof api & {
   ) => Promise<CanvasApiResult>;
   canvasAutosort?: (
     projectId: string,
-    body: {text: string; project_id?: string; mode: SortMode; artifacts?: CanvasArtifact[]; canvas?: StoryCanvasData},
+    body: {text: string; project_id?: string; mode: SortMode; artifacts?: CanvasArtifact[]; canvas?: CanvasData},
   ) => Promise<CanvasApiResult>;
   canvasCapture?: (
     projectId: string,
@@ -85,8 +84,8 @@ type CanvasApiClient = typeof api & {
       | {text: string; project_id?: string; mode: SortMode; selected_ids?: string[]; notes?: string; artifacts?: CanvasArtifact[]}
       | {proposals: CaptureProposal[]; apply: boolean},
   ) => Promise<CanvasApiResult>;
-  getCanvas?: (projectId: string) => Promise<StoryCanvasData>;
-  putCanvas?: (projectId: string, canvas: StoryCanvasData) => Promise<StoryCanvasData>;
+  getCanvas?: (projectId: string) => Promise<CanvasData>;
+  putCanvas?: (projectId: string, canvas: CanvasData) => Promise<CanvasData>;
 };
 
 type CaptureEntry = {
@@ -101,10 +100,22 @@ type AppliedOrderItem = {
   target: string;
 };
 
+type InputAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  readable: boolean;
+};
+
 const canvasApi = api as CanvasApiClient;
 
 /** Single board organization strategy: meaning-first ordering (no user-facing mode switch). */
 const BOARD_MODE: SortMode = 'semantic';
+const BOARD_MIN_SCALE = 0.25;
+const BOARD_MAX_SCALE = 1.8;
+const BOARD_FIT_MAX_SCALE = 1.05;
+const BOARD_SURFACE_MARGIN = 360;
 
 const STOP_WORDS = new Set([
   'the',
@@ -338,14 +349,14 @@ function artifactFromNode(node: CanvasNode, fallbackIndex: number): CanvasArtifa
   };
 }
 
-function canvasArtifacts(canvas: StoryCanvasData | null) {
+function canvasArtifacts(canvas: CanvasData | null) {
   return (canvas?.nodes ?? [])
     .filter((node) => (node.metadata?.semantic_type ?? node.type) !== 'Artifact')
     .map((node, index) => artifactFromNode(node, index));
 }
 
-/** Prefer the live paste; if empty, use the saved source block from the board (so Re-read works after reload). */
-function sourceTextForCanvasAnalyze(canvas: StoryCanvasData | null, paste: string): string {
+/** Prefer the live input; if empty, use the saved source block from the board (so distill-again works after reload). */
+function sourceTextForCanvasAnalyze(canvas: CanvasData | null, paste: string): string {
   const trimmed = paste.trim();
   if (trimmed) return trimmed;
   for (const node of canvas?.nodes ?? []) {
@@ -357,40 +368,6 @@ function sourceTextForCanvasAnalyze(canvas: StoryCanvasData | null, paste: strin
     }
   }
   return '';
-}
-
-function selectedCardInsights(artifact: CanvasArtifact | null) {
-  if (!artifact) {
-    return {
-      role: 'Nothing selected',
-      notes: ['Select a block to see extracted story notes.'],
-      suggestions: ['Read Chaos', 'Create Sticky'],
-    };
-  }
-  const text = `${artifact.title}\n${artifact.content}`;
-  const role =
-    artifact.tags.find((tag) => ['Theme', 'Premise', 'Mystery', 'AntiPremise', 'Stance'].includes(tag)) ??
-    (artifact.kind === 'question' ? 'Mystery / Open question' : artifact.kind === 'thread' ? 'Story concept' : 'Canvas note');
-  const notes = _clientStoryNotes(text);
-  const suggestions =
-    artifact.kind === 'question'
-      ? ['Add to Open Questions', 'Link to Time Logic', 'Find contradiction']
-      : artifact.tags.includes('Theme')
-        ? ['Add to Story Bible -> Themes', 'Link to Motifs', 'Use as writing constraint']
-        : artifact.tags.includes('Premise')
-          ? ['Add to Story Bible -> Core Premise', 'Suggest related cards', 'Connect to central mystery']
-          : ['Add to Story Bible', 'Suggest links', 'Keep on canvas'];
-  return {role, notes, suggestions};
-}
-
-function _clientStoryNotes(text: string) {
-  const sentences = text
-    .replace(/\r\n/g, '\n')
-    .split(/(?<=[。！？.!?])\s*|\n+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 6 && !line.endsWith('：'))
-    .slice(0, 5);
-  return sentences.length > 0 ? sentences : [excerptFromBlock(text)];
 }
 
 function buildHintsFromText(text: string, artifacts: CanvasArtifact[]) {
@@ -408,7 +385,7 @@ function buildHintsFromText(text: string, artifacts: CanvasArtifact[]) {
     return [
       {
         id: 'hint-empty',
-        label: 'Paste text to begin',
+        label: 'Add source to begin',
         detail: 'The canvas will surface recurring motifs, beats, and unresolved questions here.',
         x: 18,
         y: 18,
@@ -454,7 +431,7 @@ function buildLocalAnalysis(text: string): CanvasAnalysis {
   const promises = artifacts.filter((artifact) => artifact.kind === 'promise').length;
   const summary =
     artifacts.length === 0
-      ? 'No artifacts yet. Paste a scene packet, note dump, or beat sheet to populate the canvas.'
+      ? 'No artifacts yet. Add a scene packet, note dump, or beat sheet to populate the canvas.'
       : `${artifacts.length} artifacts · ${totalWords} words · ${questions} questions · ${promises} promises`;
 
   return {
@@ -468,10 +445,10 @@ function buildLocalAnalysis(text: string): CanvasAnalysis {
 function buildDraftAnalysis(text: string): CanvasAnalysis {
   const hasText = text.trim().length > 0;
   return {
-    summary: hasText ? 'Paste loaded. Press Read Chaos to extract movable story cards.' : 'No artifacts yet. Paste story material to begin.',
+    summary: hasText ? 'Input loaded. Distill it into Canvas cards when ready.' : 'No cards yet. Add source material to begin.',
     artifacts: [],
     hints: [],
-    capture: hasText ? 'Read Chaos will keep the raw paste as a source block, then extract candidate cards around it.' : undefined,
+    capture: hasText ? 'The input window will keep the raw packet as a source block, then extract candidate cards around it.' : undefined,
   };
 }
 
@@ -527,9 +504,34 @@ function currentTimeLabel() {
   }).format(new Date());
 }
 
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isTextLikeFile(file: File) {
+  const name = file.name.toLowerCase();
+  return (
+    file.type.startsWith('text/') ||
+    ['.md', '.markdown', '.txt', '.csv', '.json', '.yaml', '.yml', '.xml', '.html', '.rtf', '.log'].some((suffix) => name.endsWith(suffix))
+  );
+}
+
+async function fileToSourcePacket(file: File) {
+  const header = `\n\n---\nAttached source: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${formatFileSize(file.size)}\n`;
+  if (isTextLikeFile(file)) {
+    const text = await file.text();
+    return `${header}\n${text.trim()}`;
+  }
+
+  const mediaKind = file.type.split('/')[0] || 'file';
+  return `${header}\n[${mediaKind.toUpperCase()} ATTACHMENT]\nUse this attachment as source context. Filename, media type, and any nearby notes should guide card extraction.`;
+}
+
 function proposalKindLabel(kind: string) {
   if (kind === 'timeline_event') return 'Timeline';
-  if (kind === 'wiki') return 'Story Bible';
+  if (kind === 'wiki') return 'Wiki';
   if (kind === 'chapter') return 'Manuscript';
   return kind.replace(/_/g, ' ');
 }
@@ -539,7 +541,7 @@ function proposalPreview(content: string) {
   return compact.length > 140 ? `${compact.slice(0, 137)}...` : compact;
 }
 
-export default function StoryCanvas({onNavigate}: NavigationProps) {
+export default function Canvas({onNavigate}: NavigationProps) {
   const activeProject = useProjectStore((s) => s.activeProject);
 
   const [artifactText, setArtifactText] = useState('');
@@ -549,24 +551,28 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const [orderProposals, setOrderProposals] = useState<CaptureProposal[]>([]);
   const [selectedProposalIds, setSelectedProposalIds] = useState<Set<string>>(() => new Set());
   const [lastAppliedItems, setLastAppliedItems] = useState<AppliedOrderItem[]>([]);
-  const [canvas, setCanvas] = useState<StoryCanvasData | null>(null);
+  const [canvas, setCanvas] = useState<CanvasData | null>(null);
   const [viewport, setViewport] = useState({x: 0, y: 0, scale: 1});
   const [contextMenu, setContextMenu] = useState<{nodeId: string; x: number; y: number} | null>(null);
-  const [lastReadText, setLastReadText] = useState('');
-  const [analysisStatus, setAnalysisStatus] = useState('Local parse ready.');
+  const [lastDistilledText, setLastDistilledText] = useState('');
+  const [analysisStatus, setAnalysisStatus] = useState('Input window ready.');
+  const [inputAttachments, setInputAttachments] = useState<InputAttachment[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isApplyingOrder, setIsApplyingOrder] = useState(false);
   const suggestedOrderRef = useRef<HTMLElement | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<StoryCanvasData | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const canvasRef = useRef<CanvasData | null>(null);
+  const fittedCanvasSignatureRef = useRef('');
   const dragRef = useRef<
     | {kind: 'node'; id: string; dx: number; dy: number}
     | {kind: 'pan'; startX: number; startY: number; originX: number; originY: number}
     | null
   >(null);
 
-  const storageKey = activeProject ? `liteauthor.story-canvas.${activeProject.id}` : null;
+  const storageKey = activeProject ? `liteauthor.canvas.${activeProject.id}` : null;
+  const legacyStorageKey = activeProject ? `liteauthor.story-canvas.${activeProject.id}` : null;
 
   useEffect(() => {
     canvasRef.current = canvas;
@@ -574,8 +580,10 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
   useEffect(() => {
     if (!storageKey || typeof window === 'undefined') return;
-    const savedText = window.localStorage.getItem(storageKey);
-    const savedNotes = window.localStorage.getItem(`${storageKey}.capture-notes`);
+    const savedText = window.localStorage.getItem(storageKey) ?? (legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null);
+    const savedNotes =
+      window.localStorage.getItem(`${storageKey}.capture-notes`) ??
+      (legacyStorageKey ? window.localStorage.getItem(`${legacyStorageKey}.capture-notes`) : null);
     setArtifactText(savedText ?? '');
     setCaptureNotes(savedNotes ?? '');
     setSelectedId(null);
@@ -583,12 +591,14 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     setOrderProposals([]);
     setSelectedProposalIds(new Set());
     setLastAppliedItems([]);
+    fittedCanvasSignatureRef.current = '';
     setCanvas(null);
     setContextMenu(null);
     setViewport({x: 0, y: 0, scale: 1});
-    setLastReadText(savedText ?? '');
-    setAnalysisStatus('Local parse ready.');
-  }, [storageKey]);
+    setLastDistilledText(savedText ?? '');
+    setInputAttachments([]);
+    setAnalysisStatus('Input window ready.');
+  }, [legacyStorageKey, storageKey]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -640,9 +650,8 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     if (selectedNode) return artifactFromNode(selectedNode, 0);
     return artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts[0] ?? null;
   }, [artifacts, selectedId, selectedNode]);
-  const hasInput = artifactText.trim().length > 0;
-  const readChaosSourceText = useMemo(() => sourceTextForCanvasAnalyze(canvas, artifactText), [canvas, artifactText]);
-  const hasUnreadInput = Boolean(readChaosSourceText) && readChaosSourceText !== lastReadText;
+  const distillSourceText = useMemo(() => sourceTextForCanvasAnalyze(canvas, artifactText), [canvas, artifactText]);
+  const hasUndistilledInput = Boolean(distillSourceText) && distillSourceText !== lastDistilledText;
 
   useEffect(() => {
     if (artifacts.length === 0) {
@@ -655,34 +664,10 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     }
   }, [artifacts, canvas?.nodes, selectedId]);
 
-  const keywordLine = useMemo(() => {
-    if (artifacts.length === 0) return 'No artifacts detected yet.';
-    const kinds = artifacts.reduce<Record<ArtifactKind, number>>(
-      (acc, artifact) => {
-        acc[artifact.kind] += 1;
-        return acc;
-      },
-      {scene: 0, beat: 0, thread: 0, question: 0, promise: 0, note: 0},
-    );
-    return `${kinds.scene} scenes · ${kinds.beat} beats · ${kinds.thread} threads · ${kinds.question} questions`;
-  }, [artifacts]);
-
   const selectedOrderProposals = useMemo(
     () => orderProposals.filter((proposal) => selectedProposalIds.has(proposal.id)),
     [orderProposals, selectedProposalIds],
   );
-
-  const orderProposalSummary = useMemo(() => {
-    if (orderProposals.length === 0) return 'No order suggestions yet.';
-    const counts = orderProposals.reduce<Record<string, number>>((acc, proposal) => {
-      const label = proposalKindLabel(proposal.kind);
-      acc[label] = (acc[label] ?? 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(counts)
-      .map(([label, count]) => `${count} ${label}`)
-      .join(' · ');
-  }, [orderProposals]);
 
   const appliedOrderSummary = useMemo(() => {
     if (lastAppliedItems.length === 0) return [];
@@ -694,8 +679,18 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     return Object.entries(counts).map(([label, count]) => `${count} ${label} update${count === 1 ? '' : 's'}`);
   }, [lastAppliedItems]);
 
-  const canReadChaos = Boolean(readChaosSourceText) && !isAnalyzing;
+  const canDistill = Boolean(distillSourceText) && !isAnalyzing;
   const canReviewSuggestedOrder = orderProposals.length > 0 && !isApplyingOrder;
+  const canvasBounds = useMemo(() => {
+    const nodes = canvas?.nodes ?? [];
+    if (nodes.length === 0) return {width: 2200, height: 1400};
+    const maxX = Math.max(...nodes.map((node) => node.x + (node.width || 300)));
+    const maxY = Math.max(...nodes.map((node) => node.y + (node.height || 180)));
+    return {
+      width: Math.max(2200, Math.ceil(maxX + BOARD_SURFACE_MARGIN)),
+      height: Math.max(1400, Math.ceil(maxY + BOARD_SURFACE_MARGIN)),
+    };
+  }, [canvas?.nodes]);
 
   const reviewSuggestedOrder = () => {
     suggestedOrderRef.current?.scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -705,16 +700,16 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     if (!activeProject) return;
     const analyzeText = sourceTextForCanvasAnalyze(canvas, artifactText);
     if (!analyzeText.trim()) {
-      setAnalysisStatus('Nothing to read — paste on the left or open a board with a source card.');
+      setAnalysisStatus('Add text, notes, or attachments in the input window first.');
       return;
     }
     setIsAnalyzing(true);
-    setAnalysisStatus('Analyzing canvas...');
+    setAnalysisStatus('Distilling input into cards...');
     try {
       const result = await canvasApi.canvasAnalyze?.(activeProject.id, {
         text: analyzeText,
         project_id: activeProject.id,
-        source: 'story_canvas',
+        source: 'canvas',
         mode: BOARD_MODE,
       });
 
@@ -730,7 +725,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         const nextProposals = Array.isArray(result.proposals) ? result.proposals : [];
         if (remoteCanvas) {
           setCanvas(remoteCanvas);
-          setLastReadText(analyzeText);
+          setLastDistilledText(analyzeText);
           window.requestAnimationFrame(() => fitToContent(remoteCanvas.nodes));
         }
         setAnalysis({
@@ -746,25 +741,26 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         setAnalysisStatus(
           nextProposals.length > 0
             ? `Suggested ${nextProposals.length} order update(s). Extractor: ${provider}.`
-            : `Canvas analysis updated. Extractor: ${provider}.`,
+            : `Canvas cards updated. Extractor: ${provider}.`,
         );
         return;
       }
 
       setAnalysis(localAnalysis);
       setCanvas(null);
+      fittedCanvasSignatureRef.current = '';
       setOrderProposals([]);
       setSelectedProposalIds(new Set());
       setLastAppliedItems([]);
-      setLastReadText(analyzeText);
-      setAnalysisStatus('Local analysis refreshed.');
+      setLastDistilledText(analyzeText);
+      setAnalysisStatus('Local card draft refreshed.');
     } catch {
       setAnalysis(localAnalysis);
       setOrderProposals([]);
       setSelectedProposalIds(new Set());
       setLastAppliedItems([]);
-      setLastReadText(analyzeText);
-      setAnalysisStatus('Local analysis refreshed.');
+      setLastDistilledText(analyzeText);
+      setAnalysisStatus('Local card draft refreshed.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -834,7 +830,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     }
 
     setIsApplyingOrder(true);
-    setAnalysisStatus('Applying selected story updates...');
+    setAnalysisStatus('Applying selected wiki updates...');
     try {
       const result = await canvasApi.canvasCapture?.(activeProject.id, {
         proposals: selectedOrderProposals,
@@ -851,7 +847,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         ...current,
         capture: `${appliedCount} order update${appliedCount === 1 ? '' : 's'} applied to the project.`,
       }));
-      setAnalysisStatus(`Applied ${appliedCount} story update${appliedCount === 1 ? '' : 's'}.`);
+      setAnalysisStatus(`Applied ${appliedCount} wiki update${appliedCount === 1 ? '' : 's'}.`);
     } catch {
       setAnalysisStatus('Could not apply order updates.');
     } finally {
@@ -865,18 +861,80 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
       if (clip.trim()) {
         setArtifactText(clip);
         setCanvas(null);
-        setLastReadText('');
+        fittedCanvasSignatureRef.current = '';
+        setLastDistilledText('');
         setOrderProposals([]);
         setSelectedProposalIds(new Set());
         setLastAppliedItems([]);
-        setAnalysisStatus('Clipboard text loaded into the canvas.');
+        setAnalysisStatus('Clipboard text loaded into the input window.');
       }
     } catch {
       setAnalysisStatus('Clipboard access was blocked by the browser.');
     }
   };
 
-  const persistCanvas = (nextCanvas: StoryCanvasData) => {
+  const resetBoardInput = () => {
+    setArtifactText('');
+    setCanvas(null);
+    fittedCanvasSignatureRef.current = '';
+    setLastDistilledText('');
+    setInputAttachments([]);
+    setOrderProposals([]);
+    setSelectedProposalIds(new Set());
+    setLastAppliedItems([]);
+    setAnalysisStatus('Board cleared.');
+  };
+
+  const ingestFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setAnalysisStatus(`Preparing ${list.length} attachment${list.length === 1 ? '' : 's'}...`);
+    const packets = await Promise.all(list.map((file) => fileToSourcePacket(file)));
+    setArtifactText((current) => `${current.trimEnd()}${packets.join('\n')}`.trimStart());
+    setInputAttachments((current) => [
+      ...current,
+      ...list.map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        type: file.type || 'unknown',
+        size: file.size,
+        readable: isTextLikeFile(file),
+      })),
+    ]);
+    setCanvas(null);
+    fittedCanvasSignatureRef.current = '';
+    setLastDistilledText('');
+    setOrderProposals([]);
+    setSelectedProposalIds(new Set());
+    setLastAppliedItems([]);
+    setAnalysisStatus('Attachment source added to the input window.');
+  };
+
+  const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) void ingestFiles(event.target.files);
+    event.target.value = '';
+  };
+
+  const handleInputDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    if (event.dataTransfer.files.length > 0) {
+      void ingestFiles(event.dataTransfer.files);
+      return;
+    }
+    const droppedText = event.dataTransfer.getData('text/plain').trim();
+    if (droppedText) {
+      setArtifactText((current) => `${current.trimEnd()}\n\n${droppedText}`.trimStart());
+      setCanvas(null);
+      fittedCanvasSignatureRef.current = '';
+      setLastDistilledText('');
+      setOrderProposals([]);
+      setSelectedProposalIds(new Set());
+      setLastAppliedItems([]);
+      setAnalysisStatus('Dropped text added to the input window.');
+    }
+  };
+
+  const persistCanvas = (nextCanvas: CanvasData) => {
     if (!activeProject) return;
     void canvasApi.putCanvas?.(activeProject.id, nextCanvas).catch(() => undefined);
   };
@@ -884,20 +942,30 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const fitToContent = (nodes = canvas?.nodes ?? []) => {
     const board = boardRef.current;
     if (!board || nodes.length === 0) return;
-    const padding = 120;
+    const padding = 96;
     const minX = Math.min(...nodes.map((node) => node.x));
     const minY = Math.min(...nodes.map((node) => node.y));
     const maxX = Math.max(...nodes.map((node) => node.x + (node.width || 300)));
     const maxY = Math.max(...nodes.map((node) => node.y + (node.height || 180)));
     const contentWidth = Math.max(1, maxX - minX + padding * 2);
     const contentHeight = Math.max(1, maxY - minY + padding * 2);
-    const scale = Math.max(0.55, Math.min(1.2, Math.min(board.clientWidth / contentWidth, board.clientHeight / contentHeight)));
+    const scale = Math.max(BOARD_MIN_SCALE, Math.min(BOARD_FIT_MAX_SCALE, Math.min(board.clientWidth / contentWidth, board.clientHeight / contentHeight)));
     setViewport({
       scale,
       x: Math.round((board.clientWidth - (maxX + minX) * scale) / 2),
       y: Math.round((board.clientHeight - (maxY + minY) * scale) / 2),
     });
   };
+
+  useEffect(() => {
+    const nodes = canvas?.nodes ?? [];
+    const signature = nodes.map((node) => node.id).join('|');
+    if (!signature || signature === fittedCanvasSignatureRef.current) return;
+    fittedCanvasSignatureRef.current = signature;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => fitToContent(nodes));
+    });
+  }, [canvas?.nodes]);
 
   const deleteNode = (nodeId: string) => {
     if (!canvas) return;
@@ -998,7 +1066,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
-      const nextScale = Math.max(0.55, Math.min(1.8, Number((viewport.scale - event.deltaY * 0.001).toFixed(2))));
+      const nextScale = Math.max(BOARD_MIN_SCALE, Math.min(BOARD_MAX_SCALE, Number((viewport.scale - event.deltaY * 0.001).toFixed(2))));
       setViewport((current) => ({...current, scale: nextScale}));
       return;
     }
@@ -1008,29 +1076,6 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
       x: current.x - (event.shiftKey ? event.deltaY : event.deltaX),
       y: current.y - (event.shiftKey ? 0 : event.deltaY),
     }));
-  };
-
-  const createSticky = () => {
-    const id = `node-${Date.now()}`;
-    const node: CanvasNode = {
-      id,
-      type: 'sticky',
-      x: Math.round((220 - viewport.x) / viewport.scale),
-      y: Math.round((180 - viewport.y) / viewport.scale),
-      width: 280,
-      height: 170,
-      label: 'New sticky',
-      text: 'Write a story fragment here.',
-      color: '#f8df9f',
-      metadata: {semantic_type: 'Note', tags: ['Note'], confidence: 0.6},
-    };
-    const next = canvas
-      ? {...canvas, nodes: [...canvas.nodes, node]}
-      : {version: 'liteauthor.story-canvas.v1', nodes: [node], edges: [], metadata: {source: 'local-sticky'}};
-    setCanvas(next);
-    setAnalysis((current) => ({...current, artifacts: canvasArtifacts(next), summary: `${next.nodes.length} canvas block(s).`}));
-    setSelectedId(id);
-    persistCanvas(next);
   };
 
   const editSelectedCard = () => {
@@ -1061,20 +1106,18 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
     persistCanvas(next);
   };
 
-  const selectedInsights = selectedCardInsights(selectedArtifact);
-
   if (!activeProject) {
     return (
       <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-parchment text-ink px-6 text-center">
         <div className="max-w-md">
-          <p className="font-serif text-lg italic mb-4">Select a project before opening Story Canvas.</p>
+          <p className="font-serif text-lg italic mb-4">Select a project before opening Canvas.</p>
           <button
             type="button"
             className="inline-flex items-center gap-2 font-sans text-xs uppercase px-4 py-2 bg-primary text-parchment rounded-sm border-none cursor-pointer"
-            onClick={() => onNavigate('StoryWikiHub', 'push_back')}
+            onClick={() => onNavigate('WikiHub', 'push_back')}
           >
             <BookOpen className="w-4 h-4" />
-            The Codex
+            Wiki
           </button>
         </div>
       </div>
@@ -1083,138 +1126,137 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-parchment text-ink">
-      <header className="sticky top-0 z-40 shrink-0 border-b border-oak-variant bg-parchment-bright/95 backdrop-blur px-5 py-4 md:px-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low">
-              <Layers3 className="w-5 h-5 text-primary" />
+      <header className="sticky top-0 z-40 shrink-0 border-b border-oak-variant bg-parchment-bright/95 backdrop-blur px-4 py-3 md:px-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low">
+              <Layers3 className="w-4 h-4 text-primary" />
             </div>
-            <div>
-              <p className="text-[10px] font-sans uppercase tracking-[0.28em] text-ink-muted">Canvas</p>
-              <h1 className="text-2xl font-serif italic text-primary">Story Canvas</h1>
-              <p className="text-xs text-ink-muted">{activeProject.name}</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-serif italic text-primary">Canvas</h1>
+              <p className="truncate text-xs text-ink-muted">{activeProject.name}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-              onClick={() => onNavigate('StoryWikiHub', 'push_back')}
+              className="inline-flex h-9 items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+              onClick={() => onNavigate('WikiHub', 'push_back')}
             >
               <BookOpen className="w-4 h-4" />
-              The Codex
+              Wiki
             </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-sm bg-primary px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={reviewSuggestedOrder}
-              disabled={!canReviewSuggestedOrder}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              {orderProposals.length > 0 ? 'Review updates' : 'Read for updates'}
-            </button>
+            {canReviewSuggestedOrder ? (
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-sm bg-primary px-3 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax"
+                onClick={reviewSuggestedOrder}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Updates
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[350px_minmax(0,1fr)_320px] xl:overflow-hidden">
+      <main className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_280px] xl:overflow-hidden">
         <aside className="flex h-full min-h-0 flex-col border-r border-oak-variant bg-sepia-low/70 xl:overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-5 md:p-6">
-            <section className="space-y-4 rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Input</p>
-                  <h2 className="mt-1 text-lg font-serif italic text-primary">Paste or drop notes</h2>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
+            <section
+              className="space-y-3 rounded-sm border border-oak-variant bg-parchment-bright p-3"
+              onDrop={handleInputDrop}
+              onDragOver={(event) => event.preventDefault()}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-serif text-lg italic text-primary">Source</h2>
+                <div className="flex items-center gap-1.5">
+                  <input ref={fileInputRef} type="file" className="hidden" multiple onChange={handleFileSelect} />
                   <button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Attach files"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary"
                     onClick={() => void pasteClipboard()}
+                    title="Paste"
                   >
                     <ClipboardPaste className="w-4 h-4" />
-                    Paste
-                  </button>
-                  <button
-                    type="button"
-                    className={`inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-[10px] font-sans uppercase tracking-widest ${
-                      hasUnreadInput || !canvas?.nodes?.length
-                        ? 'border-primary bg-primary text-parchment hover:bg-amber-wax'
-                        : 'border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary'
-                    } disabled:cursor-not-allowed disabled:opacity-50`}
-                    onClick={() => void syncAnalysis()}
-                    disabled={!canReadChaos}
-                  >
-                    <ScanSearch className="w-4 h-4" />
-                    {isAnalyzing ? 'Reading' : canvas?.nodes?.length && !hasUnreadInput ? 'Re-read' : 'Read Chaos'}
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted underline decoration-oak-variant/80 underline-offset-4 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={!readChaosSourceText && !canvas?.nodes?.length}
-                    onClick={() => {
-                      setArtifactText('');
-                      setCanvas(null);
-                      setLastReadText('');
-                      setOrderProposals([]);
-                      setSelectedProposalIds(new Set());
-                      setLastAppliedItems([]);
-                      setAnalysisStatus('Board cleared.');
-                    }}
-                  >
-                    Start over
                   </button>
                 </div>
               </div>
 
               <textarea
-                className="min-h-[280px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
-                placeholder="Feed the board with messy notes, fragments, outlines, or scenes."
+                className="min-h-[360px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
+                placeholder="Paste, drop, or attach source material."
                 value={artifactText}
                 onChange={(e) => {
                   setArtifactText(e.target.value);
                   setCanvas(null);
-                  setLastReadText('');
+                  fittedCanvasSignatureRef.current = '';
+                  setLastDistilledText('');
                   setOrderProposals([]);
                   setSelectedProposalIds(new Set());
                   setLastAppliedItems([]);
                 }}
+                onPaste={(event) => {
+                  if (event.clipboardData.files.length > 0) void ingestFiles(event.clipboardData.files);
+                }}
               />
-            </section>
-
-            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-4">
+              {inputAttachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {inputAttachments.map((attachment) => (
+                    <span
+                      key={attachment.id}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-oak-variant bg-sepia-low px-2.5 py-1 text-[10px] font-sans uppercase tracking-widest text-ink-muted"
+                      title={`${attachment.name} · ${attachment.type} · ${formatFileSize(attachment.size)}`}
+                    >
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{attachment.name}</span>
+                      <span className="shrink-0 normal-case tracking-normal">{attachment.readable ? 'text' : 'media'}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="flex items-center gap-2">
-                <WandSparkles className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Read status</h3>
+                <button
+                  type="button"
+                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-sm border px-3 py-2 text-[10px] font-sans uppercase tracking-widest ${
+                    hasUndistilledInput || !canvas?.nodes?.length
+                      ? 'border-primary bg-primary text-parchment hover:bg-amber-wax'
+                      : 'border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary'
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                  onClick={() => void syncAnalysis()}
+                  disabled={!canDistill}
+                >
+                  <ScanSearch className="w-4 h-4" />
+                  {isAnalyzing ? 'Distilling' : 'Distill'}
+                </button>
+                <button
+                  type="button"
+                  className="h-9 rounded-sm border border-oak-variant px-3 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!distillSourceText && !canvas?.nodes?.length}
+                  onClick={resetBoardInput}
+                >
+                  Clear
+                </button>
               </div>
-              <p className="mt-3 text-sm leading-relaxed text-ink-muted">{analysis.summary}</p>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                  <div className="text-[10px] uppercase tracking-widest text-ink-muted">Artifacts</div>
-                  <div className="mt-1 text-lg font-semibold text-primary">{artifacts.length}</div>
-                </div>
-                <div className="rounded-sm border border-oak-variant bg-sepia-low p-3">
-                  <div className="text-[10px] uppercase tracking-widest text-ink-muted">Words in paste</div>
-                  <div className="mt-1 text-lg font-semibold text-primary">{pasteWordCount}</div>
-                </div>
-              </div>
-              <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-ink-muted">{keywordLine}</p>
-              <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-primary">{orderProposalSummary}</p>
-              <p className="mt-2 text-[11px] text-ink-muted">{analysisStatus}</p>
+              <p className="text-[11px] text-ink-muted">
+                {artifacts.length} cards · {pasteWordCount} words · {analysisStatus}
+              </p>
             </section>
 
-            <section className="mt-auto rounded-sm border border-oak-variant bg-parchment-bright p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock3 className="w-4 h-4 text-oak" />
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-muted">Note</h3>
-                </div>
-                <span className="text-[10px] uppercase tracking-widest text-ink-muted">Private</span>
-              </div>
+            <section className="mt-auto rounded-sm border border-oak-variant bg-parchment-bright p-3">
+              <h3 className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Note</h3>
               <textarea
-                className="mt-3 min-h-[100px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-3 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
-                placeholder="Optional private note (saved with the board)."
+                className="mt-2 min-h-[76px] w-full resize-y rounded-sm border border-oak-variant bg-parchment px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-ink-muted/70 focus:border-primary"
+                placeholder="Optional."
                 value={captureNotes}
                 onChange={(e) => setCaptureNotes(e.target.value)}
               />
@@ -1225,88 +1267,61 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                 disabled={isCapturing}
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                {isCapturing ? 'Saving…' : 'Save note to log'}
+                {isCapturing ? 'Saving…' : 'Save'}
               </button>
             </section>
           </div>
         </aside>
 
         <section className="relative flex min-h-[50vh] flex-1 flex-col overflow-hidden bg-parchment-dim xl:min-h-0">
-          <div className="shrink-0 border-b border-oak-variant bg-parchment/70 px-5 py-4 md:px-8">
-            <div className="flex flex-wrap items-center gap-3 justify-between">
-              <div>
-                <p className="text-[10px] font-sans uppercase tracking-[0.28em] text-ink-muted">Board</p>
-                <p className="mt-1 text-sm text-ink-muted">{analysis.capture ?? 'Paste messy material, read the chaos, then review what belongs in canon, timeline, or manuscript.'}</p>
-              </div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-oak-variant bg-sepia-low px-3 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted">
-                <TriangleAlert className="w-3.5 h-3.5" />
-                {artifacts.some((artifact) => artifact.kind === 'question') ? 'Questions need review' : 'No urgent gaps detected'}
-              </div>
-            </div>
-          </div>
-
           <div
             ref={boardRef}
-            className="relative min-h-0 flex-1 cursor-grab overflow-hidden p-5 md:p-8"
+            className="relative min-h-0 flex-1 cursor-grab overflow-hidden p-4 md:p-6"
             onPointerDown={startPan}
             onPointerMove={movePointer}
             onPointerUp={endPointer}
             onPointerCancel={endPointer}
             onWheel={handleWheel}
           >
-            <div data-canvas-control="true" className="absolute right-5 top-5 z-30 flex flex-wrap items-center gap-2 rounded-sm border border-oak-variant bg-parchment-bright/95 p-2 shadow-sm">
+            <div data-canvas-control="true" className="absolute right-4 top-4 z-30 flex items-center gap-1.5 rounded-sm border border-oak-variant bg-parchment-bright/95 p-1.5 shadow-sm">
               <button
                 type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-                onClick={() => setViewport((current) => ({...current, scale: Math.max(0.55, Number((current.scale - 0.1).toFixed(2)))}))}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => setViewport((current) => ({...current, scale: Math.max(BOARD_MIN_SCALE, Number((current.scale - 0.1).toFixed(2)))}))}
                 title="Zoom out"
               >
                 <Minus className="h-4 w-4" />
-                Zoom
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
-                onClick={() => setViewport((current) => ({...current, scale: Math.min(1.8, Number((current.scale + 0.1).toFixed(2)))}))}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant text-ink-muted hover:border-primary hover:text-primary"
+                onClick={() => setViewport((current) => ({...current, scale: Math.min(BOARD_MAX_SCALE, Number((current.scale + 0.1).toFixed(2)))}))}
                 title="Zoom in"
               >
                 <Plus className="h-4 w-4" />
-                Zoom
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant text-ink-muted hover:border-primary hover:text-primary"
                 onClick={() => fitToContent()}
                 title="Fit to content"
               >
                 <Maximize2 className="h-4 w-4" />
-                Fit
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant text-ink-muted hover:border-primary hover:text-primary"
                 onClick={() => setViewport({x: 0, y: 0, scale: 1})}
                 title="Reset view"
               >
                 <Home className="h-4 w-4" />
-                Reset
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-oak-variant px-2.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant text-ink-muted hover:border-primary hover:text-primary"
                 title="Drag empty board or middle mouse to pan"
               >
                 <Move className="h-4 w-4" />
-                Pan
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-8 items-center justify-center gap-2 rounded-sm border border-primary bg-primary px-2.5 text-[10px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax"
-                onClick={createSticky}
-                title="New card"
-              >
-                <StickyNote className="h-4 w-4" />
-                New Card
               </button>
             </div>
             {!canvas?.nodes?.length && analysis.hints.length > 0 ? (
@@ -1332,17 +1347,18 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-oak-variant bg-sepia-low">
                     <ScanSearch className="w-6 h-6 text-primary" />
                   </div>
-                  <h2 className="mt-4 text-2xl font-serif italic text-primary">Paste messy story material</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                    Drop notes, fragments, outlines, or scenes here. LiteAuthor will split them into cards and suggest what belongs in your
-                    canon, timeline, or manuscript.
-                  </p>
+                  <h2 className="mt-4 text-2xl font-serif italic text-primary">Add source</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-ink-muted">Paste, attach, or drop material on the left.</p>
                 </div>
               </div>
             ) : canvas?.nodes?.length ? (
               <div
-                className="absolute left-0 top-0 z-10 h-[1400px] w-[2200px] origin-top-left"
-                style={{transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`}}
+                className="absolute left-0 top-0 z-10 origin-top-left"
+                style={{
+                  width: canvasBounds.width,
+                  height: canvasBounds.height,
+                  transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+                }}
               >
                 <div
                   className="absolute inset-0 opacity-50"
@@ -1511,108 +1527,67 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
         </section>
 
         <aside className="flex h-full min-h-0 max-h-full flex-col border-l border-oak-variant bg-sepia-low/70 xl:overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain p-4 md:p-5">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
             <section className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
-              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Selection</p>
               {selectedArtifact ? (
                 <>
-                  <h2 className="mt-1 font-serif text-lg font-semibold italic leading-snug text-primary">{selectedArtifact.title}</h2>
+                  <h2 className="font-serif text-lg font-semibold italic leading-snug text-primary">{selectedArtifact.title}</h2>
                   {canvas?.nodes?.length ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm border border-oak-variant bg-sepia-low px-2 py-1.5 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary sm:flex-none"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-oak-variant bg-sepia-low text-ink-muted hover:border-primary hover:text-primary"
                         onClick={editSelectedCard}
+                        title="Edit card"
                       >
                         <Move className="h-3.5 w-3.5" />
-                        Edit
                       </button>
                       <button
                         type="button"
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm border border-red-500/45 bg-red-50 px-2 py-1.5 text-[10px] font-sans font-bold uppercase tracking-widest text-red-700 hover:border-red-600 hover:bg-red-100 sm:flex-none"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-red-500/45 bg-red-50 text-red-700 hover:border-red-600 hover:bg-red-100"
                         onClick={deleteSelectedNode}
+                        title="Delete card"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        Delete
                       </button>
                     </div>
                   ) : null}
                   <p className="mt-3 line-clamp-6 text-sm leading-relaxed text-ink-muted">{selectedArtifact.excerpt}</p>
-                  <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
-                    <span className="font-medium text-ink">{selectedInsights.role}</span>
-                    <span>
-                      {' · '}
-                      <span className="capitalize">{selectedArtifact.kind}</span>
-                      {selectedArtifact.status !== 'draft' ? ` · ${selectedArtifact.status}` : null}
-                    </span>
-                    {selectedArtifact.tags.length > 0 ? (
-                      <span className="mt-1 block text-[11px] text-ink-muted/90">{selectedArtifact.tags.slice(0, 6).join(' · ')}</span>
-                    ) : null}
-                  </p>
+                  <p className="mt-2 text-[11px] capitalize text-ink-muted">{selectedArtifact.kind}</p>
                 </>
               ) : (
-                <p className="mt-2 text-sm text-ink-muted">Select a card on the board.</p>
+                <p className="text-sm text-ink-muted">No card selected.</p>
               )}
             </section>
 
             <section ref={suggestedOrderRef} className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
-              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Updates from Read Chaos</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Updates</p>
+                {orderProposals.length > 0 ? (
+                  <span className="text-[10px] font-sans uppercase tracking-widest text-primary">{selectedOrderProposals.length}/{orderProposals.length}</span>
+                ) : null}
+              </div>
               <p className="mt-1 font-serif text-base font-semibold italic text-primary">
                 {orderProposals.length > 0
-                  ? `${orderProposals.length} to review`
+                  ? `${orderProposals.length} pending`
                   : lastAppliedItems.length > 0
-                    ? 'Last run applied'
-                    : readChaosSourceText
-                      ? hasUnreadInput
-                        ? 'Ready to read'
-                        : 'Board is current'
-                      : 'Nothing yet'}
+                    ? 'Applied'
+                    : 'None'}
               </p>
 
-              <div className="mt-2 flex flex-col gap-2">
-                {orderProposals.length > 0 ? (
-                  <>
-                    <button
-                      type="button"
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2.5 text-[11px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => void applyOrderProposals()}
-                      disabled={isApplyingOrder || selectedOrderProposals.length === 0}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {isApplyingOrder ? 'Applying…' : `Apply ${selectedOrderProposals.length}`}
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-sm border border-oak-variant bg-sepia-low px-3 py-2 text-[10px] font-sans uppercase tracking-widest text-ink-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => void syncAnalysis()}
-                      disabled={!canReadChaos || isAnalyzing || isApplyingOrder}
-                    >
-                      <ScanSearch className="h-3.5 w-3.5" />
-                      {isAnalyzing ? 'Reading…' : 'Re-read board'}
-                    </button>
-                  </>
-                ) : (
+              {orderProposals.length > 0 ? (
+                <div className="mt-2">
                   <button
                     type="button"
                     className="inline-flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2.5 text-[11px] font-sans uppercase tracking-widest text-parchment hover:bg-amber-wax disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={() => void syncAnalysis()}
-                    disabled={!canReadChaos || isAnalyzing || isApplyingOrder}
+                    onClick={() => void applyOrderProposals()}
+                    disabled={isApplyingOrder || selectedOrderProposals.length === 0}
                   >
-                    <ScanSearch className="h-3.5 w-3.5" />
-                    {isAnalyzing ? 'Reading…' : canvas?.nodes?.length && !hasUnreadInput ? 'Re-read board' : 'Read Chaos'}
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {isApplyingOrder ? 'Applying…' : `Apply ${selectedOrderProposals.length}`}
                   </button>
-                )}
-              </div>
-
-              {orderProposals.length > 0 ? (
-                <p className="mt-2 text-xs text-ink-muted">Select suggestions in the list, then tap Apply above.</p>
-              ) : lastAppliedItems.length > 0 ? (
-                <p className="mt-2 text-xs text-ink-muted">Open a workspace when you are ready.</p>
-              ) : readChaosSourceText ? (
-                <p className="mt-2 text-xs text-ink-muted">Suggestions for bible, timeline, and manuscript appear here after you read.</p>
-              ) : (
-                <p className="mt-2 text-xs text-ink-muted">Paste story text on the left to begin.</p>
-              )}
+                </div>
+              ) : null}
 
               {orderProposals.length > 0 ? (
                 <>
@@ -1690,9 +1665,9 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                     <button
                       type="button"
                       className="rounded-sm border border-oak-variant px-2 py-1.5 font-sans text-[10px] uppercase tracking-widest text-primary hover:border-primary"
-                      onClick={() => onNavigate('StoryBible', 'push')}
+                      onClick={() => onNavigate('Wiki', 'push')}
                     >
-                      Story Bible
+                      Wiki
                     </button>
                     <button
                       type="button"
@@ -1706,9 +1681,10 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
               ) : null}
             </section>
 
-            <section className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
-              <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Activity</p>
-              <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-0.5">
+            {captures.length > 0 || lastAppliedItems.length > 0 ? (
+              <section className="rounded-sm border border-oak-variant bg-parchment-bright p-3">
+                <p className="text-[10px] font-sans uppercase tracking-widest text-ink-muted">Log</p>
+                <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-0.5">
                 {lastAppliedItems.length > 0 ? (
                   <ul className="rounded-sm border border-primary/30 bg-sepia-highest/80 p-2 text-xs text-ink-muted">
                     {appliedOrderSummary.map((line) => (
@@ -1716,10 +1692,7 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                     ))}
                   </ul>
                 ) : null}
-                {captures.length === 0 && lastAppliedItems.length === 0 ? (
-                  <p className="text-xs text-ink-muted">No saves or applied updates yet.</p>
-                ) : (
-                  captures.map((entry) => (
+                {captures.map((entry) => (
                     <article key={entry.id} className="rounded-sm border border-oak-variant bg-sepia-low p-2">
                       <div className="flex items-start justify-between gap-2">
                         <h4 className="text-xs font-semibold text-primary">{entry.title}</h4>
@@ -1727,10 +1700,10 @@ export default function StoryCanvas({onNavigate}: NavigationProps) {
                       </div>
                       <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-ink-muted">{entry.detail}</p>
                     </article>
-                  ))
-                )}
-              </div>
-            </section>
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         </aside>
       </main>

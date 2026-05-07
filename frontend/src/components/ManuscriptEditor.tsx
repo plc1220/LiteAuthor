@@ -1,4 +1,3 @@
-import {CharacterCount} from '@tiptap/extension-character-count';
 import Placeholder from '@tiptap/extension-placeholder';
 import BubbleMenuExt from '@tiptap/extension-bubble-menu';
 import type {Editor} from '@tiptap/core';
@@ -13,7 +12,9 @@ import {Decoration, DecorationSet} from '@tiptap/pm/view';
 import type {Node as PMNode} from '@tiptap/pm/model';
 import {markdownToTipTapDoc, tipTapDocToMarkdown} from '../lib/markdownDoc';
 import {api} from '../lib/api';
+import {countManuscriptWords} from '../lib/wordCount';
 import {searchSlashCommands, type CommandId, type CommandPaletteItem} from '../lib/writingCommands';
+import lumoFabUrl from '../assets/lumo/lumo-fab.png';
 
 export type ManuscriptEditorHandle = {
   getEditor: () => Editor | null;
@@ -41,6 +42,8 @@ type Props = {
   sceneId: string;
   onSaved?: () => void;
   onStats?: (words: number) => void;
+  /** Called after scene markdown is loaded from the server (use for “last saved” from file mtime). */
+  onHydrated?: (payload: {updatedAt: string}) => void;
   onSelectionChange?: (sel: {from: number; to: number; text: string}) => void;
   onAutocompleteContext?: (context: AutocompleteContext) => void;
   typewriterScrollParentRef?: RefObject<HTMLElement | null>;
@@ -49,6 +52,8 @@ type Props = {
   commands?: CommandPaletteItem[];
   onCommand?: (commandId: CommandId, scope: CommandScope, freeform?: string) => void;
   onInlinePreviewAction?: (action: 'apply' | 'dismiss' | 'review' | 'regenerate') => void;
+  /** Floating Lumo control (e.g. manual snapshot). Omit to hide. */
+  companionFab?: {hidden: boolean; onClick: () => void | Promise<void>; title?: string};
 };
 
 const SAVE_MS = 900;
@@ -235,6 +240,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     sceneId,
     onSaved,
     onStats,
+    onHydrated,
     onSelectionChange,
     onAutocompleteContext,
     typewriterScrollParentRef,
@@ -243,6 +249,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     commands = [],
     onCommand,
     onInlinePreviewAction,
+    companionFab,
   },
   ref,
 ) {
@@ -258,6 +265,12 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
   onEntityClickRef.current = onEntityClick;
   const onInlinePreviewActionRef = useRef(onInlinePreviewAction);
   onInlinePreviewActionRef.current = onInlinePreviewAction;
+  const onAutocompleteContextRef = useRef(onAutocompleteContext);
+  onAutocompleteContextRef.current = onAutocompleteContext;
+  const onStatsRef = useRef(onStats);
+  onStatsRef.current = onStats;
+  const onHydratedRef = useRef(onHydrated);
+  onHydratedRef.current = onHydrated;
   const edRef = useRef<Editor | null>(null);
   const inlinePreview = useRef<InlinePreview | null>(null);
   const [slashMenu, setSlashMenu] = useState<{
@@ -367,10 +380,13 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
       if (!context || context.before === lastAutocompleteBefore.current) return;
       const typedChars = context.before.length - lastAutocompleteBefore.current.length;
       const meaningfulBoundary = /[\s.,!?;:]$/.test(context.before);
+      if (typedChars < 0) {
+        lastAutocompleteBefore.current = context.before;
+        return;
+      }
       if (!meaningfulBoundary && typedChars < 3) return;
-      if (typedChars < 0) return;
       lastAutocompleteBefore.current = context.before;
-      onAutocompleteContext?.(context);
+      onAutocompleteContextRef.current?.(context);
     }, AUTOCOMPLETE_MS);
   };
 
@@ -387,7 +403,6 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     extensions: [
       StarterKit.configure({heading: {levels: [1, 2, 3]}}),
       Placeholder.configure({placeholder: 'Write the scene…'}),
-      CharacterCount,
       BubbleMenuExt.configure({}),
     ],
     content: markdownToTipTapDoc(''),
@@ -477,8 +492,6 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
                 const t = (e.target as HTMLElement | null)?.closest?.('.story-memory-entity');
                 if (t) {
                   onEntityClickRef.current?.((t as HTMLElement).textContent?.trim() ?? '');
-                  e.preventDefault();
-                  return true;
                 }
                 return false;
               },
@@ -576,7 +589,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     },
     onUpdate: ({editor: ed}) => {
       refreshInlinePreview(ed, null);
-      onStats?.(ed.storage.characterCount.words());
+      onStatsRef.current?.(countManuscriptWords(ed.getText()));
       scheduleAutocomplete(ed);
       updateSlashMenu(ed);
       runTypewriterScroll(ed);
@@ -684,10 +697,11 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     let cancelled = false;
     (async () => {
       try {
-        const {markdown} = await api.getSceneContent(projectId, sceneId);
+        const {markdown, updated_at} = await api.getSceneContent(projectId, sceneId);
         if (cancelled) return;
-        editor.commands.setContent(markdownToTipTapDoc(markdown));
-        onStats?.(editor.storage.characterCount.words());
+        editor.commands.setContent(markdownToTipTapDoc(markdown), false);
+        onStatsRef.current?.(countManuscriptWords(editor.getText()));
+        onHydratedRef.current?.({updatedAt: updated_at});
       } catch {
         /* ignore */
       }
@@ -695,7 +709,7 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
     return () => {
       cancelled = true;
     };
-  }, [editor, projectId, sceneId, onStats]);
+  }, [editor, projectId, sceneId]);
 
   useEffect(() => {
     const onInlineAction = (event: Event) => {
@@ -908,6 +922,18 @@ export const ManuscriptEditor = forwardRef<ManuscriptEditorHandle, Props>(functi
             );
           })}
         </div>
+      ) : null}
+
+      {companionFab && !companionFab.hidden ? (
+        <button
+          type="button"
+          className="snapshot-button fixed z-40 flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-[3px] border-white bg-surface-container shadow-[0_8px_24px_rgba(39,26,18,0.18)] transition-transform hover:scale-110 active:scale-95 sm:h-14 sm:w-14 sm:border-4"
+          title={companionFab.title ?? 'Lumo'}
+          aria-label={companionFab.title ?? 'Lumo'}
+          onClick={() => void companionFab.onClick()}
+        >
+          <img src={lumoFabUrl} alt="Lumo" className="h-full w-full object-cover object-center" draggable={false} />
+        </button>
       ) : null}
     </div>
   );

@@ -5,7 +5,7 @@ import {AppScaffold} from '../components/AppScaffold';
 import {useProjectStore} from '../stores/projectStore';
 import {api} from '../lib/api';
 import {MOTIFS_WIKI_PATH} from '../components/MotifTrackerPanel';
-import {setStoryBibleOpen} from '../lib/storyBibleOpen';
+import {setWikiOpen} from '../lib/wikiOpen';
 
 function noteLabel(path: string) {
   return path.replace(/^story\//, '').replace(/\.md$/i, '');
@@ -17,7 +17,7 @@ function formatMemoryDepth(wikiChars: number) {
   return `${Math.round(wikiChars / 1000)}k reference chars`;
 }
 
-export default function StoryWikiHub({onNavigate}: NavigationProps) {
+export default function WikiHub({onNavigate}: NavigationProps) {
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const selectProject = useProjectStore((s) => s.selectProject);
@@ -115,9 +115,9 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
         <section className="mb-4 flex flex-col gap-4 border-b border-oak-variant pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">{activeProject?.name ?? 'No project selected'}</p>
-            <h1 className="mt-1 text-4xl font-semibold italic text-primary">The Codex</h1>
+            <h1 className="mt-1 text-4xl font-semibold italic text-primary">Wiki</h1>
             <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">
-              Throw loose ideas into the Canvas. Distill them into Timeline and Story Bible canon. Then return to the editor with cleaner story memory.
+              Throw loose ideas into the Canvas. Distill them into Timeline and Wiki canon. Then return to the manuscript with cleaner context.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -160,7 +160,7 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
             </div>
             <div>
               <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Memory depth</p>
-              <p className="mt-0.5 font-serif text-xl text-primary" title="Volume of story reference the AI can draw on">
+              <p className="mt-0.5 font-serif text-xl text-primary" title="Volume of wiki reference the AI can draw on">
                 {formatMemoryDepth(stats.wiki_chars ?? 0)}
               </p>
             </div>
@@ -170,20 +170,20 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
         <div className="space-y-8">
           <section>
             <h2 className="mb-1 font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Build</h2>
-            <p className="mb-4 text-xs text-ink-muted/90">Spatial chaos, then linear order—two workbenches for the same story.</p>
+            <p className="mb-4 text-xs text-ink-muted/90">Canvas for source packets, Timeline for order, Wiki for canon.</p>
             <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 className="flex w-full min-h-[8.5rem] items-start gap-4 rounded-sm border border-primary/20 bg-parchment-bright p-5 text-left shadow-sm hover:border-primary/50 hover:bg-sepia-low"
-                onClick={() => onNavigate('StoryCanvas', 'push')}
+                onClick={() => onNavigate('Canvas', 'push')}
               >
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm border border-oak-variant bg-sepia-high text-primary">
                   <Layers3 className="h-6 w-6" />
                 </span>
                 <span className="min-w-0 pt-0.5">
-                  <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Story canvas</span>
-                  <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">The chaos</span>
-                  <span className="mt-1 block text-sm leading-6 text-ink-muted">Drop messy notes, fragments, images, and scene ideas. LiteAuthor will help find the story shape.</span>
+                  <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Canvas</span>
+                  <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">Source window</span>
+                  <span className="mt-1 block text-sm leading-6 text-ink-muted">Drop notes, fragments, images, and scene ideas. LiteAuthor distills them into cards.</span>
                 </span>
               </button>
               <button
@@ -209,13 +209,13 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
             <button
               type="button"
               className="flex w-full min-h-[7.5rem] items-start gap-4 rounded-sm border border-primary/25 bg-sepia-low/80 p-5 text-left shadow-sm hover:border-primary/50 hover:bg-sepia-mid/40"
-              onClick={() => onNavigate('StoryBible', 'push')}
+              onClick={() => onNavigate('Wiki', 'push')}
             >
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm border border-oak-variant bg-parchment-bright text-primary">
                 <BookMarked className="h-6 w-6" />
               </span>
               <span className="min-w-0 pt-0.5">
-                <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Story Bible</span>
+                <span className="block font-sans text-sm font-bold uppercase tracking-widest text-primary">Wiki</span>
                 <span className="mt-0.5 block text-[10px] font-sans font-semibold uppercase tracking-widest text-ink-muted/80">Canon</span>
                 <span className="mt-1 block text-sm leading-6 text-ink-muted">
                   Characters, places, world rules, motifs, and unresolved questions the editor can remember while you write. {wikiFiles.length} reference file{wikiFiles.length === 1 ? '' : 's'} in this project.
@@ -276,8 +276,8 @@ export default function StoryWikiHub({onNavigate}: NavigationProps) {
                   type="button"
                   className="block w-full rounded-sm border border-oak-variant bg-parchment-bright p-3 text-left hover:border-primary"
                   onClick={() => {
-                    setStoryBibleOpen(hit.path === MOTIFS_WIKI_PATH ? {view: 'motifs'} : {view: 'file', path: hit.path});
-                    onNavigate('StoryBible', 'push');
+                    setWikiOpen(hit.path === MOTIFS_WIKI_PATH ? {view: 'motifs'} : {view: 'file', path: hit.path});
+                    onNavigate('Wiki', 'push');
                   }}
                 >
                   <span className="block font-mono text-xs text-primary">{noteLabel(hit.path)}</span>

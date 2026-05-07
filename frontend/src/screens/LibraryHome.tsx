@@ -221,7 +221,7 @@ function ProjectCard({
   const health = getStoryHealthLabel(project, progress);
   const arcTitle = emotionalValues?.length
     ? 'Emotional arc snapshot'
-    : 'Map emotional arc in the Codex or story metadata';
+    : 'Map emotional arc in the Wiki or story metadata';
 
   return (
     <article className="group relative overflow-hidden rounded-soft border border-oak-variant bg-sepia-low transition-all hover:-translate-y-1 hover:border-primary/45 hover:bg-sepia-mid">
@@ -533,7 +533,7 @@ export default function LibraryHome({onNavigate}: NavigationProps) {
                 <BookOpen className="h-10 w-10 text-primary" />
               </div>
               <h2 className="font-serif text-3xl italic text-ink">Start your first manuscript</h2>
-              <p className="mt-3 max-w-md text-sm leading-6 text-ink-muted">Create a local project with a manuscript, story wiki, and metadata store.</p>
+              <p className="mt-3 max-w-md text-sm leading-6 text-ink-muted">Create a local project with a manuscript, wiki, and metadata store.</p>
               <button
                 type="button"
                 className="mt-7 flex items-center gap-2 rounded-sm bg-primary px-5 py-3 text-xs font-bold uppercase tracking-widest text-parchment-bright hover:brightness-110"

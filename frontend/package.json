@@ -9,13 +9,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "process-lumo": "node scripts/process-lumo-assets.mjs",
+    "process-lumo-animation": "node scripts/process-lumo-animation-sheet.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
     "@tiptap/core": "^2.11.5",
     "@tiptap/extension-bubble-menu": "^2.27.2",
-    "@tiptap/extension-character-count": "^2.11.5",
     "@tiptap/extension-placeholder": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
@@ -34,6 +35,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

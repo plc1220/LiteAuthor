@@ -162,8 +162,8 @@ class CanvasEdge(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class StoryCanvas(BaseModel):
-    version: str = "liteauthor.story-canvas.v1"
+class Canvas(BaseModel):
+    version: str = "liteauthor.canvas.v1"
     nodes: list[CanvasNode] = Field(default_factory=list)
     edges: list[CanvasEdge] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -175,7 +175,7 @@ class CanvasAnalyzeRequest(BaseModel):
 
 
 class CanvasAutosortRequest(BaseModel):
-    canvas: StoryCanvas
+    canvas: Canvas
     mode: str = "type"
 
 
@@ -192,6 +192,19 @@ class CaptureProposal(BaseModel):
 class CanvasCaptureRequest(BaseModel):
     proposals: list[CaptureProposal]
     apply: bool = False
+
+
+class WikiPopulateRequest(BaseModel):
+    source: str = "manuscript"  # manuscript | canvas | text
+    scene_id: Optional[str] = None
+    title: Optional[str] = None
+    text: Optional[str] = Field(default=None, max_length=120000)
+    canvas: Optional[Canvas] = None
+
+
+class WikiApplyRequest(BaseModel):
+    proposals: list[CaptureProposal]
+    apply: bool = True
 
 
 class StorycraftRuleOut(BaseModel):

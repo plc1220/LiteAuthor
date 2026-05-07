@@ -2,9 +2,9 @@ import {useEffect, useState} from 'react';
 import {motion, AnimatePresence} from 'motion/react';
 import {Screen, TransitionType} from './types';
 import LibraryHome from './screens/LibraryHome';
-import StoryWikiHub from './screens/StoryWikiHub';
-import StoryBible from './screens/StoryBible';
-import StoryCanvas from './screens/StoryCanvas';
+import WikiHub from './screens/WikiHub';
+import Wiki from './screens/Wiki';
+import Canvas from './screens/Canvas';
 import TimelineView from './screens/TimelineView';
 import AgentMode from './screens/AgentMode';
 import ZenEditor from './screens/ZenEditor';
@@ -47,12 +47,12 @@ export default function App() {
     switch (currentScreen) {
       case 'LibraryHome':
         return <LibraryHome {...props} />;
-      case 'StoryWikiHub':
-        return <StoryWikiHub {...props} />;
-      case 'StoryBible':
-        return <StoryBible {...props} />;
-      case 'StoryCanvas':
-        return <StoryCanvas {...props} />;
+      case 'WikiHub':
+        return <WikiHub {...props} />;
+      case 'Wiki':
+        return <Wiki {...props} />;
+      case 'Canvas':
+        return <Canvas {...props} />;
       case 'TimelineView':
         return <TimelineView {...props} />;
       case 'AgentMode':

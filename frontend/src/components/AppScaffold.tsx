@@ -1,8 +1,8 @@
 import type {ReactNode} from 'react';
-import {BookOpen, Home, Library, Settings} from 'lucide-react';
+import {BookOpen, Home, Library} from 'lucide-react';
 import type {NavigationProps, Screen, TransitionType} from '../types';
 
-type AppSection = 'manuscript' | 'desk' | 'settings';
+type AppSection = 'manuscript' | 'desk';
 
 type AppScaffoldProps = {
   active: AppSection;
@@ -13,14 +13,13 @@ type AppScaffoldProps = {
   onNavigate: NavigationProps['onNavigate'];
   /** Shown before any built-in or action navigation (e.g. flush draft save). */
   beforeNavigate?: () => void | Promise<void>;
-  /** Hide global header, footer, and the built-in right-side of the top bar; children control chrome. */
+  /** Hide global header and the built-in nav area; optional `footer` still renders. Children may add floating chrome. */
   minimalChrome?: boolean;
 };
 
 const NAV_ITEMS: {label: string; screen: Screen; active: AppSection; icon: ReactNode; transition: TransitionType}[] = [
   {label: 'Manuscript', screen: 'ZenEditor', active: 'manuscript', icon: <BookOpen className="h-4 w-4" />, transition: 'push_back'},
-  {label: 'The Codex', screen: 'StoryWikiHub', active: 'desk', icon: <Library className="h-4 w-4" />, transition: 'push'},
-  {label: 'Settings', screen: 'SettingsScreen', active: 'settings', icon: <Settings className="h-4 w-4" />, transition: 'push'},
+  {label: 'Wiki', screen: 'WikiHub', active: 'desk', icon: <Library className="h-4 w-4" />, transition: 'push'},
 ];
 
 export function AppScaffold({active, children, actions, footer, mainClassName = 'overflow-y-auto', onNavigate, beforeNavigate, minimalChrome = false}: AppScaffoldProps) {
@@ -83,7 +82,7 @@ export function AppScaffold({active, children, actions, footer, mainClassName = 
       )}
 
       <main className={`relative min-h-0 flex-1 ${mainClassName}`}>{children}</main>
-      {minimalChrome ? null : footer}
+      {footer}
     </div>
   );
 }

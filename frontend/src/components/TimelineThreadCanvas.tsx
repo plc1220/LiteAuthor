@@ -152,13 +152,13 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
           ? 'Flagged in data; verify reader knowledge and timing'
           : tns.hint
             ? tns.hint
-            : 'World time → when this surfaces in the manuscript order';
+            : 'World time -> when this surfaces in the manuscript order';
         next.push({
           eventId: e.id,
           d: bezierD(x0, wTop, x1, wBot),
           color,
           dash,
-          title: `${e.title} — ${lineTitle}`,
+          title: `${e.title} - ${lineTitle}`,
         });
       }
       setPaths((prev) => (pathsEqual(prev, next) ? prev : next));
@@ -212,25 +212,42 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest text-ink-muted">Thread map</h3>
-        <p className="max-w-xl text-[10px] leading-normal text-ink-muted/80">
-          Drag a world event onto a chapter to anchor the reveal. Curves show cross-overs; amber = worth another look, dashed = out-of-chronology tell (often a frame or memory).
-        </p>
+    <div className="flex min-h-0 min-w-0 flex-col rounded-sm border border-oak-variant bg-parchment-bright/85 p-3 shadow-sm md:p-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-oak-variant/70 pb-3">
+        <div>
+          <h3 className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Thread map</h3>
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-ink-muted">
+            Drag a world event onto a chapter to anchor its reveal. Amber marks timing or logic worth reviewing; dashed connectors mark reordered tells.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 font-sans text-[10px] uppercase tracking-widest text-ink-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-px w-5 bg-oak" aria-hidden />
+            Placed
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-px w-5 border-t border-dashed border-ink-muted" aria-hidden />
+            Reordered
+          </span>
+        </div>
       </div>
 
       <div ref={wrapRef} className="relative w-full min-w-0">
-        <div className="text-[9px] font-sans font-bold uppercase tracking-widest text-ink-muted/60">World time (chronology)</div>
+        <div className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">World time</div>
         <div
           ref={topRef}
-          className="mt-2 flex min-h-[4.5rem] gap-1.5 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-gutter:stable] sm:gap-2"
+          className="mt-2 flex min-h-[5.5rem] gap-2 overflow-x-auto overflow-y-hidden pb-2 [scrollbar-gutter:stable] sm:gap-3"
         >
+          {worldLine.length === 0 ? (
+            <div className="flex min-h-20 w-full items-center rounded-sm border border-dashed border-oak-variant bg-sepia-low/50 px-4 text-sm text-ink-muted">
+              No timeline events yet.
+            </div>
+          ) : null}
           {worldLine.map((e) => {
             const tns = continuityTension(e, events);
             const tense = tns.level === 'tension' || e.has_conflict;
             return (
-              <div key={e.id} className="w-[6.5rem] shrink-0 sm:w-28">
+              <div key={e.id} className="w-36 shrink-0 sm:w-40">
                 <button
                   data-wid={e.id}
                   type="button"
@@ -243,29 +260,33 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
                   onDragEnd={onDragEnd}
                   onClick={() => onSelect(e)}
                   className={[
-                    'w-full min-h-16 rounded-sm border p-1.5 text-left transition',
-                    'bg-parchment-bright hover:border-primary/40',
-                    selectedId === e.id ? 'ring-1 ring-primary border-primary' : 'border-oak-variant',
-                    tense || e.has_conflict ? 'ring-1 ring-amber-600/40' : '',
+                    'w-full min-h-20 rounded-sm border p-2 text-left transition',
+                    'bg-parchment hover:border-primary/50 hover:bg-parchment-bright',
+                    selectedId === e.id ? 'border-primary bg-sepia-low ring-1 ring-primary' : 'border-oak-variant',
+                    tense || e.has_conflict ? 'border-amber-wax/70 ring-1 ring-amber-wax/30' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
                   title={
                     tns.hint
-                      ? `${e.title} — ${tns.hint}`
-                      : (e.story_time ?? 'No world-time label') + (e.notes ? ` — ${e.notes.slice(0, 120)}` : '')
+                      ? `${e.title} - ${tns.hint}`
+                      : (e.story_time ?? 'No world-time label') + (e.notes ? ` - ${e.notes.slice(0, 120)}` : '')
                   }
                 >
-                  <p className="line-clamp-2 font-sans text-[9px] font-bold uppercase leading-tight tracking-wide text-primary">{e.title}</p>
-                  {e.story_time ? <p className="mt-1 line-clamp-1 font-serif text-[9px] italic text-ink-muted">{(e.story_time as string) ?? ''}</p> : <p className="mt-1 text-[8px] text-ink-muted/60">TBD in world</p>}
-                  <div className="mt-1.5 flex items-center justify-between">
+                  <p className="line-clamp-2 font-serif text-sm italic leading-tight text-primary">{e.title}</p>
+                  {e.story_time ? (
+                    <p className="mt-1 line-clamp-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted">{(e.story_time as string) ?? ''}</p>
+                  ) : (
+                    <p className="mt-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted/60">World TBD</p>
+                  )}
+                  <div className="mt-2 flex items-center justify-between">
                     <span
-                      className="flex h-5 w-5 items-center justify-center rounded-full border border-oak-variant bg-sepia-high text-[9px] font-bold text-primary"
+                      className="flex h-6 w-6 items-center justify-center rounded-sm border border-oak-variant bg-sepia-high font-sans text-[10px] font-bold text-primary"
                       aria-hidden
                     >
                       {avatarLabel(e)}
                     </span>
-                    {tns.level === 'watch' && !e.has_conflict ? <span className="text-[8px] text-slate-600">↪</span> : null}
+                    {tns.level === 'watch' && !e.has_conflict ? <span className="font-sans text-[10px] uppercase tracking-widest text-ink-muted">Reordered</span> : null}
                   </div>
                 </button>
               </div>
@@ -273,7 +294,7 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
           })}
         </div>
 
-        <div className="relative h-20 w-full shrink-0 sm:h-24" aria-hidden>
+        <div className="relative h-16 w-full shrink-0 sm:h-20" aria-hidden>
           <svg className="h-full w-full" viewBox="0 0 1000 100" preserveAspectRatio="none" role="presentation" style={{overflow: 'visible'}}>
             {paths.map((p) => (
               <path
@@ -281,13 +302,13 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
                 d={p.d}
                 fill="none"
                 stroke={p.color}
-                strokeWidth="1.25"
+                strokeWidth="1.1"
                 vectorEffect="non-scaling-stroke"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeDasharray={p.dash === '0' ? undefined : p.dash}
                 pointerEvents="none"
-                opacity={0.92}
+                opacity={0.72}
               >
                 <title>{p.title}</title>
               </path>
@@ -298,10 +319,10 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
           {paths.length} string connectors between world time and chapter reveal columns.
         </p>
 
-        <div className="text-[9px] font-sans font-bold uppercase tracking-widest text-ink-muted/60">Reader time (manuscript / chapters)</div>
+        <div className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted">Reader time</div>
         <div
           ref={btmRef}
-          className="mt-2 flex min-h-24 gap-1.5 overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable] sm:gap-2"
+          className="mt-2 flex min-h-28 gap-2 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-gutter:stable] sm:gap-3"
         >
           {chSorted.map((ch, idx) => {
             const c = counts[ch.id] ?? 0;
@@ -321,21 +342,21 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
                 <div
                   data-col={`ch-${ch.id}`}
                   className={[
-                    'h-full min-h-24 rounded-sm border border-dashed p-2 text-left',
-                    'bg-sepia-low/40 transition',
-                    dragId ? 'border-amber-700/40' : 'border-oak-variant/50',
-                    gap ? 'ring-1 ring-amber-500/20' : '',
+                    'h-full min-h-28 rounded-sm border p-2.5 text-left transition',
+                    'bg-sepia-low/70',
+                    dragId ? 'border-amber-wax bg-amber-wax-container/20' : 'border-oak-variant',
+                    gap ? 'ring-1 ring-amber-wax/30' : '',
                   ].join(' ')}
                 >
-                  <p className="line-clamp-2 text-[9px] font-sans font-bold uppercase tracking-tight text-primary">Ch. {idx + 1}</p>
-                  <p className="mt-0.5 line-clamp-2 font-serif text-xs italic text-ink">{ch.title}</p>
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-sm bg-parchment/80" title="Event density in this chapter">
+                  <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-primary">Chapter {idx + 1}</p>
+                  <p className="mt-1 line-clamp-2 font-serif text-sm italic leading-tight text-ink">{ch.title}</p>
+                  <div className="mt-2 h-1 w-full overflow-hidden rounded-sm bg-parchment/90" title="Event density in this chapter">
                     <div className={`h-full ${hot ? 'bg-amber-600' : c > 0 ? 'bg-primary' : 'bg-oak/30'}`} style={{width: `${Math.min(100, wPct)}%`}} />
                   </div>
-                  <p className="mt-0.5 text-[8px] text-ink-muted">
+                  <p className="mt-1 font-sans text-[10px] uppercase tracking-widest text-ink-muted">
                     {c} beat{c === 1 ? '' : 's'}
-                    {gap ? ' · Pacing lull' : c === 0 && chSorted.length > 1 && idx > 0 && idx < chSorted.length - 1 ? ' · Empty' : null}
-                    {c >= 4 ? ' · Busy' : null}
+                    {gap ? ' / Lull' : c === 0 && chSorted.length > 1 && idx > 0 && idx < chSorted.length - 1 ? ' / Empty' : null}
+                    {c >= 4 ? ' / Busy' : null}
                   </p>
                 </div>
               </div>
@@ -352,12 +373,12 @@ export function TimelineThreadCanvas({events, chapters, scenes, selectedId, onSe
             }}
           >
             <div
-              className="h-full min-h-24 rounded-sm border border-dashed border-oak-variant/30 bg-parchment/30 p-2"
+              className="h-full min-h-28 rounded-sm border border-dashed border-oak-variant/60 bg-parchment/50 p-2.5"
               data-col="u"
               title="Events with no scene anchor or narrative place yet."
             >
-              <p className="text-[9px] font-sans font-bold uppercase tracking-tight text-ink-muted/70">Unplaced</p>
-              <p className="mt-1 text-[8px] leading-tight text-ink-muted/70">Drag from world, drop on a chapter to reveal it there</p>
+              <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-ink-muted/80">Unplaced</p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-muted/80">Drop on a chapter to set the reveal point.</p>
             </div>
           </div>
         </div>
